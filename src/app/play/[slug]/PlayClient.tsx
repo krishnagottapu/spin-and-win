@@ -1,0 +1,391 @@
+'use client';
+
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import RegistrationForm from '@/components/play/RegistrationForm';
+import QueuePosition from '@/components/play/QueuePosition';
+import SpinButton from '@/components/play/SpinButton';
+import ResultDisplay from '@/components/play/ResultDisplay';
+import { useSessionChannel } from '@/lib/supabase/realtime';
+import type { QueueJoinResponse, QueueStatusResponse, SpinResponse } from '@/lib/types';
+
+// ─── Mobile Shell: header + footer matching TV party theme ────────────────────
+
+function MobileShell({ children, eventName }: { children: ReactNode; eventName: string }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-gray-950 text-white">
+      {/* Header — party style matching TV */}
+      <div className="shrink-0 bg-gradient-to-r from-purple-900/50 via-pink-900/50 to-yellow-900/50 px-3 py-3 text-center">
+        <h1 className="animate-pulse bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-400 bg-clip-text text-base font-extrabold tracking-wide text-transparent sm:text-lg">
+          🎉 {eventName} 🎉
+        </h1>
+      </div>
+
+      {/* Main content */}
+      {children}
+
+      {/* Footer — infinite scrolling ticker matching TV */}
+      <div className="relative shrink-0 overflow-hidden border-t border-gray-800 bg-gray-900 py-2">
+        <div className="flex items-center">
+          <div className="z-10 shrink-0 bg-gray-900 pl-3 pr-3">
+            <img
+              src="/logo/utsav_logo.png"
+              alt="Logo"
+              className="h-6 w-auto"
+            />
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <div className="animate-ticker flex whitespace-nowrap">
+              <span className="mx-6 text-sm font-semibold text-yellow-400">🎉 {eventName}</span>
+              <span className="mx-6 text-sm text-gray-300">Join the game and win amazing prizes!</span>
+              <span className="mx-6 text-sm font-semibold text-yellow-400">🏆 Spin to Win!</span>
+              <span className="mx-6 text-sm text-gray-300">Good luck to all participants!</span>
+              <span className="mx-6 text-sm font-semibold text-yellow-400">🎉 {eventName}</span>
+              <span className="mx-6 text-sm text-gray-300">Join the game and win amazing prizes!</span>
+              <span className="mx-6 text-sm font-semibold text-yellow-400">🏆 Spin to Win!</span>
+              <span className="mx-6 text-sm text-gray-300">Good luck to all participants!</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type PlayState =
+  | { phase: 'loading' }
+  | { phase: 'closed' }
+  | { phase: 'register' }
+  | { phase: 'queue'; position: number; estimatedWait: number; participantId: string }
+  | { phase: 'spin'; participantId: string; error?: string }
+  | { phase: 'result'; prizeName: string; isNoPrize: boolean; resultToken: string | null; isFulfilled?: boolean; fulfilledAt?: string | null }
+  | { phase: 'ended' };
+
+interface PlayClientProps {
+  sessionId: string;
+  slug: string;
+  status: string;
+  endTime: string;
+  eventName: string;
+}
+
+export default function PlayClient({
+  sessionId,
+  slug,
+  status,
+  endTime,
+  eventName,
+}: PlayClientProps) {
+  const [state, setState] = useState<PlayState>({ phase: 'loading' });
+  const [participantId, setParticipantId] = useState<string | null>(null);
+  const spinStartTimeRef = useRef<number>(0);
+
+  // Initial mount: check sessionStorage and recover state
+  useEffect(() => {
+    // If session not active, show closed
+    if (status === 'draft' || status === 'ended') {
+      setState({ phase: 'closed' });
+      return;
+    }
+
+    // Check if session has expired client-side
+    if (new Date() > new Date(endTime)) {
+      setState({ phase: 'ended' });
+      return;
+    }
+
+    const storedPhone = sessionStorage.getItem(`spin_phone_${slug}`);
+    if (!storedPhone) {
+      setState({ phase: 'register' });
+      return;
+    }
+
+    // Attempt session recovery
+    async function recoverSession(phone: string) {
+      try {
+        const res = await fetch(
+          `/api/queue/status?sessionId=${encodeURIComponent(sessionId)}&phone=${encodeURIComponent(phone)}`
+        );
+        if (!res.ok) {
+          setState({ phase: 'register' });
+          return;
+        }
+        const data = (await res.json()) as QueueStatusResponse;
+        setParticipantId(data.participant_id);
+        mapStatusToPhase(data);
+      } catch {
+        setState({ phase: 'register' });
+      }
+    }
+
+    recoverSession(storedPhone);
+  }, [sessionId, slug, status, endTime]);
+
+  function mapStatusToPhase(data: QueueStatusResponse) {
+    switch (data.status) {
+      case 'queued':
+        setState({
+          phase: 'queue',
+          position: data.queue_position ?? 1,
+          estimatedWait: data.estimated_wait_seconds ?? 0,
+          participantId: data.participant_id,
+        });
+        break;
+      case 'active':
+        setState({ phase: 'spin', participantId: data.participant_id });
+        break;
+      case 'spinning':
+        // User already tapped spin but result hasn't arrived yet.
+        // Show result-pending state — Realtime spin:result will transition to result.
+        setState({ phase: 'spin', participantId: data.participant_id });
+        break;
+      case 'completed':
+        setState({
+          phase: 'result',
+          prizeName: data.prize_name ?? '',
+          isNoPrize: !data.prize_name || (data.is_no_prize ?? false),
+          resultToken: data.result_token,
+          isFulfilled: data.is_fulfilled ?? false,
+          fulfilledAt: data.fulfilled_at ?? null,
+        });
+        break;
+      default:
+        setState({ phase: 'register' });
+    }
+  }
+
+  // Handle successful registration
+  const handleRegistrationSuccess = useCallback((response: QueueJoinResponse) => {
+    setParticipantId(response.participant_id);
+    if (response.status === 'active') {
+      setState({ phase: 'spin', participantId: response.participant_id });
+    } else {
+      setState({
+        phase: 'queue',
+        position: response.queue_position,
+        estimatedWait: response.estimated_wait_seconds,
+        participantId: response.participant_id,
+      });
+    }
+  }, []);
+
+  // Handle existing user — restore their session state
+  const handleExistingUser = useCallback((data: QueueStatusResponse) => {
+    setParticipantId(data.participant_id);
+    mapStatusToPhase(data);
+  }, []);
+
+  // Handle spin result from the API response (has result_token)
+  const handleSpinResult = useCallback((result: SpinResponse) => {
+    // Record spin start time so realtime events also respect the delay
+    spinStartTimeRef.current = Date.now();
+    setState({
+      phase: 'result',
+      prizeName: result.prize_name,
+      isNoPrize: result.is_no_prize,
+      resultToken: result.result_token,
+    });
+  }, []);
+
+  // Handle spin error: 403 means already spun, network error means show retry message
+  const handleSpinError = useCallback(async (statusCode: number | null) => {
+    if (statusCode === 403) {
+      // Already spun — recover result from status endpoint
+      const storedPhone = sessionStorage.getItem(`spin_phone_${slug}`);
+      if (storedPhone) {
+        try {
+          const statusRes = await fetch(
+            `/api/queue/status?sessionId=${encodeURIComponent(sessionId)}&phone=${encodeURIComponent(storedPhone)}`
+          );
+          if (statusRes.ok) {
+            const data = (await statusRes.json()) as QueueStatusResponse;
+            if (data.status === 'completed') {
+              setState({
+                phase: 'result',
+                prizeName: data.prize_name ?? '',
+                isNoPrize: !data.prize_name || (data.is_no_prize ?? false),
+                resultToken: data.result_token,
+              });
+              return;
+            }
+          }
+        } catch {
+          // Fall through to generic error
+        }
+      }
+    }
+
+    // Network error or other failure: show error without losing spin state
+    setState((prev) => {
+      if (prev.phase === 'spin') {
+        return { ...prev, error: 'Something went wrong — please try again' };
+      }
+      return prev;
+    });
+  }, [sessionId, slug]);
+
+  // Clear spin error when user dismisses it
+  const handleClearError = useCallback(() => {
+    setState((prev) => {
+      if (prev.phase === 'spin') {
+        return { ...prev, error: undefined };
+      }
+      return prev;
+    });
+  }, []);
+
+  // Subscribe to realtime events
+  useSessionChannel(sessionId, {
+    onQueueUpdated: (payload) => {
+      if (!participantId) return;
+      const myEntry = payload.positions.find((p) => p.id === participantId);
+      if (myEntry) {
+        setState((prev) => {
+          if (prev.phase === 'queue') {
+            return {
+              ...prev,
+              position: myEntry.position,
+              estimatedWait: (myEntry.position - 1) * 60,
+            };
+          }
+          return prev;
+        });
+      }
+    },
+    onPlayerActive: (payload) => {
+      if (payload.participant_id === participantId) {
+        setState({ phase: 'spin', participantId: payload.participant_id });
+      }
+    },
+    onSpinResult: (payload) => {
+      if (payload.participant_id === participantId) {
+        // Delay result to match TV wheel animation (8 seconds from spin start)
+        const SPIN_DURATION_MS = 8000;
+        const elapsed = Date.now() - spinStartTimeRef.current;
+        const remaining = Math.max(0, SPIN_DURATION_MS - elapsed);
+
+        setTimeout(() => {
+          setState((prev) => {
+            // If already in result phase with a resultToken (API responded first), don't overwrite
+            if (prev.phase === 'result' && prev.resultToken !== null) {
+              return prev;
+            }
+            return {
+              phase: 'result',
+              prizeName: payload.prize_name,
+              isNoPrize: payload.is_no_prize,
+              resultToken: null,
+            };
+          });
+        }, remaining);
+      }
+    },
+    onSessionEnded: () => {
+      setState((prev) => {
+        // Don't interrupt result phase — user still needs their token
+        if (prev.phase === 'result') return prev;
+        return { phase: 'ended' };
+      });
+    },
+  });
+
+  // Render based on phase
+  switch (state.phase) {
+    case 'loading':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-white border-t-transparent" />
+          </div>
+        </MobileShell>
+      );
+
+    case 'closed':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 items-center justify-center px-4">
+            <p className="text-center text-xl text-gray-400">
+              This event is not currently active.
+            </p>
+          </div>
+        </MobileShell>
+      );
+
+    case 'register':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 flex-col items-center justify-center">
+            <RegistrationForm
+              sessionId={sessionId}
+              slug={slug}
+              onSuccess={handleRegistrationSuccess}
+              onExistingUser={handleExistingUser}
+            />
+          </div>
+        </MobileShell>
+      );
+
+    case 'queue':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 flex-col items-center justify-center">
+            <QueuePosition
+              position={state.position}
+              estimatedWait={state.estimatedWait}
+            />
+          </div>
+        </MobileShell>
+      );
+
+    case 'spin':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 flex-col items-center justify-center px-4">
+            {state.error && (
+              <div className="mb-4 rounded-lg bg-red-900/50 px-4 py-3 text-center text-white">
+                <p>{state.error}</p>
+                <button
+                  onClick={handleClearError}
+                  className="mt-2 text-sm text-red-300 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            <SpinButton
+              sessionId={sessionId}
+              participantId={state.participantId}
+              onResult={handleSpinResult}
+              onError={handleSpinError}
+              onSpinStart={() => { spinStartTimeRef.current = Date.now(); }}
+            />
+          </div>
+        </MobileShell>
+      );
+
+    case 'result':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 flex-col items-center justify-center">
+            <ResultDisplay
+              prizeName={state.prizeName}
+              isNoPrize={state.isNoPrize}
+              resultToken={state.resultToken}
+              isFulfilled={state.isFulfilled}
+              fulfilledAt={state.fulfilledAt}
+            />
+          </div>
+        </MobileShell>
+      );
+
+    case 'ended':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 items-center justify-center px-4">
+            <p className="text-center text-xl text-gray-400">
+              The event has ended — thank you for joining!
+            </p>
+          </div>
+        </MobileShell>
+      );
+  }
+}
