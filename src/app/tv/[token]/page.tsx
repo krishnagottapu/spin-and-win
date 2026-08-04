@@ -49,11 +49,13 @@ export default async function TvPage({ params }: TvPageProps) {
     .order('spin_completed_at', { ascending: false });
 
   // Fetch prizes for wheel display and name mapping (ordered by creation for stable index)
+  // ORDER must exactly match POST /api/spin which uses created_at ASC, id ASC
   const { data: prizes } = await supabase
     .from('prizes')
     .select('id, name, is_no_prize')
     .eq('session_id', session.id)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
 
   // Build winner list: exclude no-prize entries
   const prizeMap = new Map(
