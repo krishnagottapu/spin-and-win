@@ -72,25 +72,14 @@ describe('POST /api/auth/staff', () => {
     const eqCodeCheck = vi.fn().mockReturnValue({ single: singleFn });
     mockSelect.mockReturnValue({ eq: eqCodeCheck });
 
-    mockSupabase.from.mockImplementation((table: string) => {
-      if (table === 'staff') {
-        // First call: update attempt, second call: existence check
-        return {
-          update: mockUpdate,
-          select: mockSelect,
-        };
-      }
-      return { update: mockUpdate, select: mockSelect };
-    });
-
     // We need more precise mock: first from('staff') is for update, second is for select
     let callCount = 0;
     mockSupabase.from.mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        return { update: mockUpdate };
+        return { update: mockUpdate, select: vi.fn() };
       }
-      return { select: mockSelect };
+      return { select: mockSelect, update: vi.fn() };
     });
 
     const { POST } = await import('@/app/api/auth/staff/route');
@@ -129,9 +118,9 @@ describe('POST /api/auth/staff', () => {
     mockSupabase.from.mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        return { update: mockUpdate };
+        return { update: mockUpdate, select: vi.fn() };
       }
-      return { select: mockSelect };
+      return { select: mockSelect, update: vi.fn() };
     });
 
     const { POST } = await import('@/app/api/auth/staff/route');
@@ -160,6 +149,7 @@ describe('POST /api/auth/staff', () => {
 
     mockSupabase.from.mockImplementation(() => ({
       update: mockUpdate,
+      select: vi.fn(),
     }));
 
     const { POST } = await import('@/app/api/auth/staff/route');
@@ -223,10 +213,10 @@ describe('POST /api/claim/fulfill', () => {
       fromCallCount++;
       if (fromCallCount === 1) {
         // First call: fetch participant
-        return { select: participantSelect };
+        return { select: participantSelect, update: vi.fn() };
       }
       // Second call: update attempt
-      return { update: updateFn };
+      return { update: updateFn, select: vi.fn() };
     });
 
     const { POST } = await import('@/app/api/claim/fulfill/route');
@@ -274,9 +264,9 @@ describe('POST /api/claim/fulfill', () => {
     mockSupabase.from.mockImplementation(() => {
       fromCallCount++;
       if (fromCallCount === 1) {
-        return { select: participantSelect };
+        return { select: participantSelect, update: vi.fn() };
       }
-      return { update: updateFn };
+      return { update: updateFn, select: vi.fn() };
     });
 
     const { POST } = await import('@/app/api/claim/fulfill/route');
