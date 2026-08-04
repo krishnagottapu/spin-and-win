@@ -252,6 +252,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         end_time: body.end_time,
         max_spins_per_user: body.max_spins_per_user ?? 1,
         include_no_prize: body.include_no_prize ?? false,
+        otp_enabled: body.otp_enabled ?? true,
         theme: body.theme,
         sound_preset: body.sound_preset,
       })

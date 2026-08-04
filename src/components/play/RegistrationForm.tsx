@@ -8,6 +8,7 @@ interface RegistrationFormProps {
   slug: string;
   onSuccess: (response: QueueJoinResponse) => void;
   onExistingUser?: (data: QueueStatusResponse) => void;
+  otpEnabled: boolean;
 }
 
 type FormStep = 'info' | 'otp';
@@ -29,6 +30,7 @@ export default function RegistrationForm({
   slug,
   onSuccess,
   onExistingUser,
+  otpEnabled,
 }: RegistrationFormProps) {
   const [step, setStep] = useState<FormStep>('info');
   const [name, setName] = useState('');
@@ -87,8 +89,52 @@ export default function RegistrationForm({
     setErrors({});
     setIsSending(true);
 
+    // If OTP is disabled for this session, skip verification and join directly
+    if (!otpEnabled) {
+      try {
+        // Check if existing user first
+        const checkRes = await fetch(
+          `/api/queue/status?sessionId=${encodeURIComponent(sessionId)}&phone=${encodeURIComponent(phoneToSend.trim())}`
+        );
+        if (checkRes.ok) {
+          const statusData = (await checkRes.json()) as QueueStatusResponse;
+          sessionStorage.setItem(`spin_phone_${slug}`, phoneToSend.trim());
+          if (onExistingUser) {
+            onExistingUser(statusData);
+          }
+          return;
+        }
+
+        // New user — join queue directly
+        const joinRes = await fetch('/api/queue/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionId,
+            name: name.trim(),
+            phone: phoneToSend.trim(),
+          }),
+        });
+
+        if (!joinRes.ok) {
+          const errorData = await joinRes.json();
+          setErrors({ general: errorData.error || 'Failed to join queue' });
+          return;
+        }
+
+        const joinData = (await joinRes.json()) as QueueJoinResponse;
+        sessionStorage.setItem(`spin_phone_${slug}`, phoneToSend.trim());
+        onSuccess(joinData);
+      } catch {
+        setErrors({ general: 'Something went wrong. Please try again.' });
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
+
+    // OTP enabled — send verification code
     try {
-      // Send OTP (duplicate check happens after verification)
       const res = await fetch('/api/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -303,7 +349,7 @@ export default function RegistrationForm({
           disabled={isSending}
           className="min-h-[56px] w-full rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-lg font-bold text-white transition-all hover:from-purple-700 hover:to-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isSending ? 'Sending Code...' : 'Send Verification Code'}
+          {isSending ? 'Joining...' : otpEnabled ? 'Send Verification Code' : 'Join the Queue'}
         </button>
       </form>
     );

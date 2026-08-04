@@ -33,6 +33,9 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
   const [includeNoPrize, setIncludeNoPrize] = useState(
     session?.include_no_prize ?? false
   );
+  const [otpEnabled, setOtpEnabled] = useState(
+    session?.otp_enabled ?? true
+  );
   const [theme, setTheme] = useState<WheelTheme>(session?.theme ?? 'corporate');
   const [soundPreset, setSoundPreset] = useState<SoundPreset>(
     session?.sound_preset ?? 'drumroll'
@@ -88,6 +91,7 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
         end_time: new Date(endTime).toISOString(),
         max_spins_per_user: maxSpinsPerUser,
         include_no_prize: includeNoPrize,
+        otp_enabled: otpEnabled,
         theme,
         sound_preset: soundPreset,
         prizes,
@@ -251,6 +255,26 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
           >
             Include &quot;No Prize&quot; option on the wheel
           </label>
+        </div>
+
+        <div className="flex items-start sm:col-span-2">
+          <input
+            id="otp_enabled"
+            type="checkbox"
+            checked={otpEnabled}
+            onChange={(e) => setOtpEnabled(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="ml-2">
+            <label htmlFor="otp_enabled" className="text-sm font-medium text-gray-700">
+              Require phone verification (OTP)
+            </label>
+            <p className="text-xs text-gray-500">
+              {otpEnabled
+                ? 'Players must verify their phone number via SMS before joining. Requires Twilio to be configured.'
+                : 'Players join instantly without SMS verification. Use this if Twilio is not set up.'}
+            </p>
+          </div>
         </div>
       </div>
 

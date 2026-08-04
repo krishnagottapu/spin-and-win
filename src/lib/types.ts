@@ -13,6 +13,7 @@ export interface Session {
   end_time: string; // ISO 8601
   max_spins_per_user: number;
   include_no_prize: boolean;
+  otp_enabled: boolean;
   theme: WheelTheme;
   sound_preset: SoundPreset;
   tv_token: string;
@@ -95,6 +96,7 @@ export interface CreateSessionRequest {
   end_time: string;
   max_spins_per_user?: number;
   include_no_prize?: boolean;
+  otp_enabled?: boolean;
   theme: WheelTheme;
   sound_preset: SoundPreset;
   prizes: CreatePrizeInput[];

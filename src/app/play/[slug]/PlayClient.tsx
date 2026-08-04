@@ -66,6 +66,7 @@ interface PlayClientProps {
   status: string;
   endTime: string;
   eventName: string;
+  otpEnabled: boolean;
 }
 
 export default function PlayClient({
@@ -74,6 +75,7 @@ export default function PlayClient({
   status,
   endTime,
   eventName,
+  otpEnabled,
 }: PlayClientProps) {
   const [state, setState] = useState<PlayState>({ phase: 'loading' });
   const [participantId, setParticipantId] = useState<string | null>(null);
@@ -319,6 +321,7 @@ export default function PlayClient({
               slug={slug}
               onSuccess={handleRegistrationSuccess}
               onExistingUser={handleExistingUser}
+              otpEnabled={otpEnabled}
             />
           </div>
         </MobileShell>
