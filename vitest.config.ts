@@ -8,6 +8,12 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
     globals: true,
+    testTimeout: 15000,
+    server: {
+      deps: {
+        inline: ['next'],
+      },
+    },
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },

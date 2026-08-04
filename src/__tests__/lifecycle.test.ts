@@ -1,7 +1,11 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-// ─── queueManager.promoteNextParticipant: auto-end tests ─────────────────────
+// Mock broadcastEvent so tests don't need a real Supabase channel
+vi.mock('@/lib/supabase/broadcast', () => ({
+  broadcastEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('promoteNextParticipant — session lifecycle', () => {
   beforeEach(() => {
@@ -10,7 +14,7 @@ describe('promoteNextParticipant — session lifecycle', () => {
 
   it('transitions session to ended when no queued participants and session is ending', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 
@@ -73,7 +77,7 @@ describe('promoteNextParticipant — session lifecycle', () => {
 
   it('does NOT end session when no queued participants and session is active', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 
@@ -113,7 +117,7 @@ describe('promoteNextParticipant — session lifecycle', () => {
 
   it('promotes next participant without ending session even when status is ending', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 
@@ -200,7 +204,7 @@ describe('POST /api/sessions/[id]/end', () => {
 
   it('marks all queued participants as completed and broadcasts session:ended', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 
@@ -287,7 +291,7 @@ describe('POST /api/sessions/[id]/end', () => {
   });
 
   it('returns 404 when session does not exist', async () => {
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -335,7 +339,7 @@ describe('POST /api/sessions/[id]/end', () => {
   });
 
   it('returns 422 when session is already ended', async () => {
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -383,7 +387,7 @@ describe('POST /api/sessions/[id]/end', () => {
   });
 
   it('returns 401 when no admin JWT is present', async () => {
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -428,7 +432,7 @@ describe('Full lifecycle: join → spin → complete → session auto-ends (endi
 
   it('auto-ends session when last player spins in ending session', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 
@@ -494,7 +498,7 @@ describe('Full lifecycle: join → spin → complete → session auto-ends (endi
 
   it('does NOT auto-end when session is active and queue is empty', async () => {
     const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/supabase/realtime', () => ({
+    vi.doMock('@/lib/supabase/broadcast', () => ({
       broadcastEvent: mockBroadcastEvent,
     }));
 

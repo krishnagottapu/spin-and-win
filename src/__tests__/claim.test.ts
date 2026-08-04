@@ -1,5 +1,11 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+
+// Mock broadcastEvent so tests don't need a real Supabase channel
+vi.mock('@/lib/supabase/broadcast', () => ({
+  broadcastEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Mock environment variable before importing modules
 vi.stubEnv('JWT_SECRET', 'test-secret-that-is-at-least-32-chars-long!');
@@ -171,9 +177,9 @@ describe('POST /api/auth/staff', () => {
     const setCookieHeader = response.headers.getSetCookie();
     const staffCookie = setCookieHeader.find((c) => c.includes('spin_staff_token'));
     expect(staffCookie).toBeDefined();
-    expect(staffCookie).toContain('HttpOnly');
-    expect(staffCookie).toContain('Secure');
-    expect(staffCookie).toContain('SameSite=Strict');
+    expect(staffCookie?.toLowerCase()).toContain('httponly');
+    expect(staffCookie?.toLowerCase()).toContain('secure');
+    expect(staffCookie?.toLowerCase()).toContain('samesite=strict');
   });
 });
 

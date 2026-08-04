@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @vitest-environment node
 import { NextRequest } from 'next/server';
+
+// Mock broadcastEvent so tests don't need a real Supabase channel
+vi.mock('@/lib/supabase/broadcast', () => ({
+  broadcastEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 /**
  * Helper to create a chainable mock that resolves specific queries.
