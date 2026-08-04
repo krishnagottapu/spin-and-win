@@ -86,11 +86,29 @@ export async function POST(request: NextRequest) {
         }
 
         const client = twilio(accountSid, authToken);
-        await client.messages.create({
-          body: `Your Spin & Win verification code is: ${otp}. Valid for 5 minutes.`,
-          from: fromNumber,
-          to: phone,
-        });
+        try {
+          await client.messages.create({
+            body: `Your Spin & Win verification code is: ${otp}. Valid for 5 minutes.`,
+            from: fromNumber,
+            to: phone,
+          });
+        } catch (twilioErr: unknown) {
+          const msg = twilioErr instanceof Error ? twilioErr.message : String(twilioErr);
+          console.error('[POST /api/otp] Twilio error:', msg);
+          // Delete the stored code since we couldn't send it
+          await supabase.from('otp_codes').delete().eq('phone', phone);
+          // Surface a helpful message for trial account restrictions
+          if (msg.includes('unverified') || msg.includes('21608') || msg.includes('Unverified')) {
+            return NextResponse.json<ApiError>(
+              { error: 'This phone number is not verified with our SMS provider. Please contact the event organizer.' },
+              { status: 403 }
+            );
+          }
+          return NextResponse.json<ApiError>(
+            { error: 'Failed to send SMS. Please try again.' },
+            { status: 500 }
+          );
+        }
       }
 
       return NextResponse.json({
