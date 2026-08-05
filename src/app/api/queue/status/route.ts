@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     // Query participant with prize join
     const { data: participant, error } = await supabase
       .from('participants')
-      .select('id, status, queue_position, prize_id, result_token, is_fulfilled, fulfilled_at, prizes(name, is_no_prize)')
+      .select('id, name, status, queue_position, prize_id, result_token, is_fulfilled, fulfilled_at, prizes(name, is_no_prize)')
       .eq('session_id', sessionId)
       .eq('phone', normalizedPhone)
       .single();
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
 
     const response: QueueStatusResponse = {
       participant_id: participant.id,
+      name: (participant.name as string) ?? null,
       status: participant.status,
       queue_position: displayRank,
       estimated_wait_seconds: displayRank !== null ? (displayRank - 1) * 60 : null,

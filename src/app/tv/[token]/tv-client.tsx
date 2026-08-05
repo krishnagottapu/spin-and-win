@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { QRCodeSVG } from 'qrcode.react';
 
 import { WinnerLeaderboard } from '@/components/tv/WinnerLeaderboard';
-import { ActivePlayerBanner } from '@/components/tv/ActivePlayerBanner';
 import { QueueDisplay } from '@/components/tv/QueueDisplay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import SimulationPanel from '@/components/tv/SimulationPanel';
@@ -178,9 +177,12 @@ export function TvClient({
       }
 
       // Only transition to idle if a Realtime event has not already advanced the phase
-      // (e.g. player:active, spin:result). If the phase changed, this is a no-op.
+      // AND the same participant is still active (participantId guard prevents wiping
+      // a legitimately promoted second player if this fetch resolved after player:active).
       setTvState((prev) =>
-        prev.phase === 'player_active' ? { phase: 'idle' } : prev
+        prev.phase === 'player_active' && prev.participantId === participantId
+          ? { phase: 'idle' }
+          : prev
       );
     }, delayMs);
 
@@ -691,6 +693,22 @@ export function TvClient({
               </div>
             )}
 
+            {/* Active player name / idle prompt — always rendered for stable sidebar height */}
+            <div className="shrink-0 border-b border-gray-800 p-3 text-center">
+              {currentPlayerName !== null ? (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                    Now Playing
+                  </p>
+                  <p className="text-lg font-bold text-yellow-300 truncate">
+                    {currentPlayerName}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-400">Scan the QR code to join!</p>
+              )}
+            </div>
+
             {/* Queue display — fills remaining space */}
             <div className="min-h-0 flex-1 overflow-hidden p-3">
               <QueueDisplay
@@ -713,10 +731,6 @@ export function TvClient({
               targetIndex={targetIndex}
               onStopSpinning={handleStopSpinning}
             />
-            {/* Active player banner below the wheel */}
-            <div className="mt-4 flex flex-col items-center">
-              <ActivePlayerBanner playerName={currentPlayerName} />
-            </div>
           </div>
 
           {/* Right sidebar — leaderboard only */}

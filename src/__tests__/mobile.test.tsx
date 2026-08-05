@@ -13,6 +13,7 @@ describe('SpinButton', () => {
   const defaultProps = {
     sessionId: 'session-123',
     participantId: 'participant-456',
+    playerName: 'Test Player',
     onResult: vi.fn(),
   };
 

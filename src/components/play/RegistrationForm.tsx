@@ -99,6 +99,7 @@ export default function RegistrationForm({
         if (checkRes.ok) {
           const statusData = (await checkRes.json()) as QueueStatusResponse;
           sessionStorage.setItem(`spin_phone_${slug}`, phoneToSend.trim());
+          sessionStorage.setItem(`spin_name_${slug}`, name.trim());
           if (onExistingUser) {
             onExistingUser(statusData);
           }
@@ -124,6 +125,7 @@ export default function RegistrationForm({
 
         const joinData = (await joinRes.json()) as QueueJoinResponse;
         sessionStorage.setItem(`spin_phone_${slug}`, phoneToSend.trim());
+        sessionStorage.setItem(`spin_name_${slug}`, name.trim());
         onSuccess(joinData);
       } catch {
         setErrors({ general: 'Something went wrong. Please try again.' });
@@ -244,6 +246,7 @@ export default function RegistrationForm({
         // Existing user — restore their session
         const statusData = (await checkRes.json()) as QueueStatusResponse;
         sessionStorage.setItem(`spin_phone_${slug}`, phone.trim());
+        sessionStorage.setItem(`spin_name_${slug}`, name.trim());
         if (onExistingUser) {
           onExistingUser(statusData);
         }
@@ -270,6 +273,7 @@ export default function RegistrationForm({
 
       const joinData = (await joinRes.json()) as QueueJoinResponse;
       sessionStorage.setItem(`spin_phone_${slug}`, phone.trim());
+      sessionStorage.setItem(`spin_name_${slug}`, name.trim());
       onSuccess(joinData);
     } catch {
       setErrors({ general: 'Something went wrong. Please try again.' });

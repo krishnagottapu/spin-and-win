@@ -57,7 +57,7 @@ type PlayState =
   | { phase: 'closed' }
   | { phase: 'register' }
   | { phase: 'queue'; position: number; estimatedWait: number; participantId: string }
-  | { phase: 'spin'; participantId: string; error?: string }
+  | { phase: 'spin'; participantId: string; playerName: string; error?: string }
   | { phase: 'result'; prizeName: string; isNoPrize: boolean; resultToken: string | null; isFulfilled?: boolean; fulfilledAt?: string | null }
   | { phase: 'ended' };
 
@@ -137,12 +137,20 @@ export default function PlayClient({
         });
         break;
       case 'active':
-        setState({ phase: 'spin', participantId: data.participant_id });
+        setState({
+          phase: 'spin',
+          participantId: data.participant_id,
+          playerName: data.name ?? sessionStorage.getItem(`spin_name_${slug}`) ?? '',
+        });
         break;
       case 'spinning':
         // User already tapped spin but result hasn't arrived yet.
         // Show result-pending state — Realtime spin:result will transition to result.
-        setState({ phase: 'spin', participantId: data.participant_id });
+        setState({
+          phase: 'spin',
+          participantId: data.participant_id,
+          playerName: data.name ?? sessionStorage.getItem(`spin_name_${slug}`) ?? '',
+        });
         break;
       case 'completed':
         setState({
@@ -163,7 +171,11 @@ export default function PlayClient({
   const handleRegistrationSuccess = useCallback((response: QueueJoinResponse) => {
     setParticipantId(response.participant_id);
     if (response.status === 'active') {
-      setState({ phase: 'spin', participantId: response.participant_id });
+      setState({
+        phase: 'spin',
+        participantId: response.participant_id,
+        playerName: sessionStorage.getItem(`spin_name_${slug}`) ?? '',
+      });
     } else {
       setState({
         phase: 'queue',
@@ -172,7 +184,7 @@ export default function PlayClient({
         participantId: response.participant_id,
       });
     }
-  }, []);
+  }, [slug]);
 
   // Handle existing user — restore their session state
   const handleExistingUser = useCallback((data: QueueStatusResponse) => {
@@ -263,7 +275,11 @@ export default function PlayClient({
       activatedAtRef.current = Date.now();
 
       if (payload.participant_id === participantId) {
-        setState({ phase: 'spin', participantId: payload.participant_id });
+        setState({
+          phase: 'spin',
+          participantId: payload.participant_id,
+          playerName: payload.name,
+        });
       }
     },
     onPlayerSkipped: (payload) => {
@@ -407,6 +423,7 @@ export default function PlayClient({
             <SpinButton
               sessionId={sessionId}
               participantId={state.participantId}
+              playerName={state.playerName}
               onResult={handleSpinResult}
               onError={handleSpinError}
               onSpinStart={() => { spinStartTimeRef.current = Date.now(); }}

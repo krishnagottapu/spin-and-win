@@ -8,6 +8,7 @@ const SPIN_DISPLAY_DURATION_MS = 8000;
 interface SpinButtonProps {
   sessionId: string;
   participantId: string;
+  playerName: string;
   onResult: (result: SpinResponse) => void;
   onError?: (statusCode: number | null) => void;
   onSpinStart?: () => void;
@@ -16,6 +17,7 @@ interface SpinButtonProps {
 export default function SpinButton({
   sessionId,
   participantId,
+  playerName,
   onResult,
   onError,
   onSpinStart,
@@ -120,24 +122,29 @@ export default function SpinButton({
           </p>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={handleSpin}
-          disabled={spinning}
-          className="group relative h-48 w-48 overflow-hidden rounded-full shadow-2xl transition-all duration-200 active:scale-90"
-          aria-busy={spinning}
-        >
-          {/* Animated gradient background */}
-          <div className="absolute inset-0 animate-spin-slow rounded-full" style={{ background: 'conic-gradient(from 0deg, #facc15, #ec4899, #9333ea, #facc15)' }} />
-          {/* Inner circle */}
-          <div className="absolute inset-2 flex flex-col items-center justify-center rounded-full bg-gray-950 transition-all group-hover:inset-3">
-            <img src="/logo/utsav_logo.png" alt="Logo" className="h-16 w-16 rounded-full object-contain" />
-            <span className="mt-2 text-xl font-extrabold text-white">TAP TO</span>
-            <span className="text-2xl font-extrabold text-yellow-400">SPIN!</span>
-          </div>
-          {/* Outer glow */}
-          <div className="absolute -inset-1 -z-10 animate-pulse rounded-full bg-gradient-to-r from-yellow-400/30 via-pink-500/30 to-purple-600/30 blur-lg" />
-        </button>
+        <>
+          <p className="text-xl font-bold text-white text-center">
+            Good luck, {playerName}!
+          </p>
+          <button
+            type="button"
+            onClick={handleSpin}
+            disabled={spinning}
+            className="group relative h-48 w-48 overflow-hidden rounded-full shadow-2xl transition-all duration-200 active:scale-90"
+            aria-busy={spinning}
+          >
+            {/* Animated gradient background */}
+            <div className="absolute inset-0 animate-spin-slow rounded-full" style={{ background: 'conic-gradient(from 0deg, #facc15, #ec4899, #9333ea, #facc15)' }} />
+            {/* Inner circle */}
+            <div className="absolute inset-2 flex flex-col items-center justify-center rounded-full bg-gray-950 transition-all group-hover:inset-3">
+              <img src="/logo/utsav_logo.png" alt="Logo" className="h-16 w-16 rounded-full object-contain" />
+              <span className="mt-2 text-xl font-extrabold text-white">TAP TO</span>
+              <span className="text-2xl font-extrabold text-yellow-400">SPIN!</span>
+            </div>
+            {/* Outer glow */}
+            <div className="absolute -inset-1 -z-10 animate-pulse rounded-full bg-gradient-to-r from-yellow-400/30 via-pink-500/30 to-purple-600/30 blur-lg" />
+          </button>
+        </>
       )}
 
       {error && (

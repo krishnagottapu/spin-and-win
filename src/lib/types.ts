@@ -123,6 +123,7 @@ export interface QueueJoinResponse {
 
 export interface QueueStatusResponse {
   participant_id: string;
+  name: string | null;
   status: ParticipantStatus;
   queue_position: number | null;
   estimated_wait_seconds: number | null;
