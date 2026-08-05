@@ -77,10 +77,10 @@ export default async function TvPage({ params }: TvPageProps) {
     })
     .filter((w): w is { name: string; prize_name: string; spin_completed_at: string } => w !== null);
 
-  // Fetch currently active participant
+  // Fetch currently active participant (id and activated_at needed for correct recovery timer)
   const { data: activeParticipant } = await supabase
     .from('participants')
-    .select('name')
+    .select('id, name, activated_at')
     .eq('session_id', session.id)
     .eq('status', 'active')
     .single();
@@ -119,6 +119,8 @@ export default async function TvPage({ params }: TvPageProps) {
         prizes={wheelPrizes}
         winners={winners}
         activePlayerName={activeParticipant?.name ?? null}
+        activeParticipantId={activeParticipant?.id ?? null}
+        activePlayerActivatedAt={activeParticipant?.activated_at ?? null}
         initialQueue={initialQueue}
       />
     </ErrorBoundary>

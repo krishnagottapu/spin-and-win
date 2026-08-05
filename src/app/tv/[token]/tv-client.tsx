@@ -36,7 +36,6 @@ const ConfettiOverlay = dynamic(
 type TvState =
   | { phase: 'idle' }
   | { phase: 'player_active'; playerName: string; participantId: string }
-  | { phase: 'times_up'; playerName: string }
   | { phase: 'spinning'; playerName: string; prizeIndex: number; participantId: string }
   | { phase: 'winner'; playerName: string; prizeName: string; isNoPrize: boolean }
   | { phase: 'ended' };
@@ -70,6 +69,8 @@ interface TvClientProps {
   prizes: Array<{ name: string }>;
   winners: Array<{ name: string; prize_name: string; spin_completed_at: string }>;
   activePlayerName: string | null;
+  activeParticipantId: string | null;
+  activePlayerActivatedAt: string | null;
   initialQueue: QueueEntry[];
 }
 
@@ -78,6 +79,8 @@ export function TvClient({
   prizes: initialPrizes,
   winners: initialWinners,
   activePlayerName,
+  activeParticipantId,
+  activePlayerActivatedAt,
   initialQueue,
 }: TvClientProps) {
   const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL}/play/${session.slug}`;
@@ -85,7 +88,7 @@ export function TvClient({
   // ─── State ────────────────────────────────────────────────────────────────────
   const [tvState, setTvState] = useState<TvState>(
     activePlayerName
-      ? { phase: 'player_active', playerName: activePlayerName, participantId: '' }
+      ? { phase: 'player_active', playerName: activePlayerName, participantId: activeParticipantId ?? '' }
       : { phase: 'idle' }
   );
   const [prizes, setPrizes] = useState(initialPrizes);
@@ -102,66 +105,94 @@ export function TvClient({
   const winnerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confettiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const timesUpOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFlickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Incremented every time a player becomes active — used as the timer key so a
   // returning player (same participantId) still gets a fresh countdown.
   const activationCountRef = useRef<number>(0);
+  // timesUpVisible: ref+state pair — ref for synchronous reads inside async callbacks,
+  // state for reactive rendering. Neither is in the auto-skip effect dependency array.
+  const timesUpVisibleRef = useRef<boolean>(false);
+  const [timesUpVisible, setTimesUpVisible] = useState<boolean>(false);
+
+  // nextSkipDelayMsRef: corrected auto-skip delay accounting for already-elapsed time
+  // on page-load recovery. Reset to full duration by handlePlayerActive for all
+  // subsequent players.
+  const nextSkipDelayMsRef = useRef<number>(
+    activePlayerActivatedAt
+      ? Math.max(
+          0,
+          session.spin_timeout_seconds * 1000 -
+            (Date.now() - new Date(activePlayerActivatedAt).getTime())
+        )
+      : session.spin_timeout_seconds * 1000
+  );
+
+  // hasIncrementedForRecovery: prevents syncState from incrementing activationKey
+  // more than once across multiple visibility-change recovery calls on the same player.
+  const hasIncrementedForRecovery = useRef<boolean>(false);
   const recoveringRef = useRef(true);
   const pendingQueueUpdatesRef = useRef<QueueUpdatedPayload[]>([]);
 
   // ─── Auto-skip: skip inactive active players after configured timeout ──────
+  //
+  // Design: one single async setTimeout — no inner timer, no phase change mid-flight.
+  // timesUpVisible/timesUpVisibleRef are NOT in the dependency array, so setting them
+  // inside the callback does NOT re-trigger this effect and does NOT run cleanup.
+  // This eliminates the race where the old two-step approach killed the fetch timer
+  // during the times_up phase transition cleanup.
   useEffect(() => {
-    // Start auto-skip timer when a player becomes active
-    if (tvState.phase === 'player_active') {
-      const participantId = tvState.participantId;
-      const playerName = tvState.playerName;
+    if (tvState.phase !== 'player_active') return;
 
-      autoSkipTimerRef.current = setTimeout(() => {
-        // Step 1: Show "Time's up!" overlay
-        setTvState({ phase: 'times_up', playerName });
+    const participantId = tvState.participantId;
+    // Use the corrected remaining delay for the page-load recovery case.
+    // nextSkipDelayMsRef is reset to full duration by handlePlayerActive for all
+    // subsequent players, so this only applies once per page load.
+    const delayMs = nextSkipDelayMsRef.current;
 
-        // Step 2: After 1.5 seconds, fire the skip
-        timesUpOverlayTimerRef.current = setTimeout(async () => {
-          timesUpOverlayTimerRef.current = null;
-          try {
-            await fetch('/api/queue/skip', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                session_id: session.id,
-                tv_token: session.tv_token,
-                participant_id: participantId,
-                reason: 'timeout',
-              }),
-            });
-          } catch (err) {
-            console.error('[TvClient] auto-skip failed:', err);
-          } finally {
-            // Always clear the times_up overlay. If a player:active or player:skipped
-            // Realtime event already advanced the phase, the functional update is a no-op.
-            setTvState((prev) => {
-              if (prev.phase === 'times_up') return { phase: 'idle' };
-              return prev;
-            });
-          }
-        }, 1500);
-      }, session.spin_timeout_seconds * 1000);
-    }
+    autoSkipTimerRef.current = setTimeout(async () => {
+      // Show the "Time's up!" overlay via boolean state — does NOT change tvState,
+      // so this effect's cleanup is NOT triggered.
+      timesUpVisibleRef.current = true;
+      setTimesUpVisible(true);
 
-    // Clear both timers when the player_active phase ends (spin, skip, new player, etc.)
+      // Wait for the overlay to be visible before firing the skip
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+
+      // Hide the overlay
+      timesUpVisibleRef.current = false;
+      setTimesUpVisible(false);
+
+      try {
+        await fetch('/api/queue/skip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: session.id,
+            tv_token: session.tv_token,
+            participant_id: participantId,
+            reason: 'timeout',
+          }),
+        });
+      } catch (err) {
+        console.error('[TvClient] auto-skip failed:', err);
+      }
+
+      // Only transition to idle if a Realtime event has not already advanced the phase
+      // (e.g. player:active, spin:result). If the phase changed, this is a no-op.
+      setTvState((prev) =>
+        prev.phase === 'player_active' ? { phase: 'idle' } : prev
+      );
+    }, delayMs);
+
     return () => {
       if (autoSkipTimerRef.current) {
         clearTimeout(autoSkipTimerRef.current);
         autoSkipTimerRef.current = null;
       }
-      if (timesUpOverlayTimerRef.current) {
-        clearTimeout(timesUpOverlayTimerRef.current);
-        timesUpOverlayTimerRef.current = null;
-      }
     };
-  // Depend only on the fields that identify a new active player turn, not the
-  // whole tvState object — prevents the effect re-firing on unrelated state changes.
+  // timesUpVisible and timesUpVisibleRef are intentionally excluded from deps.
+  // Including them would re-trigger the effect during the overlay display and
+  // recreate the exact cleanup race this fix is designed to eliminate.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tvState.phase, activationKey, session.id, session.tv_token, session.spin_timeout_seconds]);
 
@@ -216,7 +247,7 @@ export function TvClient({
 
         const data = await res.json() as {
           session: { status: string; prizes?: Array<{ name: string; is_no_prize: boolean }> };
-          active_participant: { id: string; name: string; status: string; queue_position: number } | null;
+          active_participant: { id: string; name: string; status: string; queue_position: number; activated_at: string | null } | null;
           last_winner: { id: string; name: string; prize_name: string; is_no_prize: boolean; spin_completed_at: string } | null;
           winners?: Array<{ name: string; prize_name: string; spin_completed_at: string }>;
           queue?: Array<{ id: string; name: string; position: number }>;
@@ -234,6 +265,14 @@ export function TvClient({
             if (prev.phase === 'spinning') return prev; // Don't interrupt animation
             return { phase: 'player_active', playerName: data.active_participant!.name, participantId: data.active_participant!.id };
           });
+          // Increment activationKey so the SpinCountdownTimer resets and the auto-skip
+          // effect fires with the correct delayMs. Guard with hasIncrementedForRecovery
+          // to prevent double-increment on repeated visibility-change recovery calls.
+          if (!hasIncrementedForRecovery.current) {
+            hasIncrementedForRecovery.current = true;
+            activationCountRef.current += 1;
+            setActivationKey(activationCountRef.current);
+          }
         } else {
           setTvState((prev) => {
             if (prev.phase === 'spinning' || prev.phase === 'winner') return prev;
@@ -396,11 +435,17 @@ export function TvClient({
   const handlePlayerActive = useCallback((payload: PlayerActivePayload) => {
     activationCountRef.current += 1;
     setActivationKey(activationCountRef.current);
+    // Reset the skip delay to full duration — the corrected remaining-time value
+    // from page-load recovery only applies once.
+    nextSkipDelayMsRef.current = session.spin_timeout_seconds * 1000;
+    // Allow syncState to increment activationKey again if this player is still
+    // active during a future visibility-change recovery.
+    hasIncrementedForRecovery.current = false;
     setTvState({ phase: 'player_active', playerName: payload.name, participantId: payload.participant_id });
     setTargetIndex(null);
     // Remove the promoted player from the queue display
     setQueue((prev) => prev.filter((q) => q.id !== payload.participant_id));
-  }, []);
+  }, [session.spin_timeout_seconds]);
 
   const handleQueueUpdated = useCallback((payload: QueueUpdatedPayload) => {
     // Buffer updates during recovery — syncState will set authoritative queue state
@@ -434,15 +479,13 @@ export function TvClient({
   }, []);
 
   const handlePlayerSkipped = useCallback((payload: PlayerSkippedPayload) => {
-    // The skipped player will be re-added to queue via queue:updated broadcast
-    // Debounce: delay transition to idle so the next player:active has time to arrive
+    // The skipped player will be re-added to queue via queue:updated broadcast.
+    // Debounce: delay transition to idle so the next player:active has time to arrive.
+    // times_up phase no longer exists — only player_active needs to be checked.
     if (skipFlickerTimerRef.current) clearTimeout(skipFlickerTimerRef.current);
     skipFlickerTimerRef.current = setTimeout(() => {
       setTvState((prev) => {
-        if (
-          (prev.phase === 'player_active' || prev.phase === 'times_up') &&
-          prev.playerName === payload.name
-        ) {
+        if (prev.phase === 'player_active' && prev.playerName === payload.name) {
           return { phase: 'idle' };
         }
         return prev;
@@ -588,14 +631,13 @@ export function TvClient({
         {/* Confetti overlay */}
         <ConfettiOverlay fire={fireConfetti} />
 
-        {/* "Time's up!" overlay */}
-        {tvState.phase === 'times_up' && (
+        {/* "Time's up!" overlay — controlled by timesUpVisible boolean, not tvState.phase */}
+        {timesUpVisible && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 animate-timesup">
             <p className="text-9xl font-black text-red-500 drop-shadow-2xl">⏰</p>
             <p className="mt-4 text-7xl font-black text-white drop-shadow-2xl">
               Time&apos;s up!
             </p>
-            <p className="mt-6 text-3xl text-gray-300">{tvState.playerName}</p>
           </div>
         )}
 

@@ -94,7 +94,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (includes.includes('active_participant')) {
       const { data: activeParticipant } = await supabase
         .from('participants')
-        .select('id, name, status, queue_position')
+        .select('id, name, status, queue_position, activated_at')
         .eq('session_id', params.id)
         .in('status', ['active', 'spinning'])
         .limit(1)
