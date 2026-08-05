@@ -176,7 +176,7 @@ describe('POST /api/queue/join', () => {
         data: { id: 'participant-2', status: 'queued', queue_position: 2 },
         error: null,
       },
-      queuePositions: { data: [{ id: 'participant-2', queue_position: 2 }], error: null },
+      queuePositions: { data: [{ id: 'participant-2', name: 'Bob', queue_position: 2 }], error: null },
     });
 
     const req = makeRequest({
@@ -353,7 +353,7 @@ describe('POST /api/queue/join', () => {
         data: { id: 'participant-20', status: 'queued', queue_position: 20 },
         error: null,
       },
-      queuePositions: { data: [{ id: 'participant-20', queue_position: 20 }], error: null },
+      queuePositions: { data: [{ id: 'participant-20', name: 'Zara', queue_position: 20 }], error: null },
     });
 
     const req = makeRequest({

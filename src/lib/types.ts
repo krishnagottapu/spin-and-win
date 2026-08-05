@@ -189,7 +189,7 @@ export interface GenerateInviteResponse {
 // ─── Realtime broadcast payload types ────────────────────────────────────────
 
 export interface QueueUpdatedPayload {
-  positions: Array<{ id: string; position: number }>;
+  positions: Array<{ id: string; name: string; position: number }>;
 }
 
 export interface PlayerActivePayload {

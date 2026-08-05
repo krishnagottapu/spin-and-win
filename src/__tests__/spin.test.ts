@@ -313,9 +313,9 @@ describe('getQueuePositions', () => {
             eq: vi.fn().mockReturnValue({
               order: vi.fn().mockResolvedValue({
                 data: [
-                  { id: 'p-1', queue_position: 2 },
-                  { id: 'p-2', queue_position: 3 },
-                  { id: 'p-3', queue_position: 4 },
+                  { id: 'p-1', name: 'Alice', queue_position: 2 },
+                  { id: 'p-2', name: 'Bob', queue_position: 3 },
+                  { id: 'p-3', name: 'Charlie', queue_position: 4 },
                 ],
                 error: null,
               }),
@@ -331,9 +331,9 @@ describe('getQueuePositions', () => {
     );
 
     expect(positions).toEqual([
-      { id: 'p-1', position: 1 },
-      { id: 'p-2', position: 2 },
-      { id: 'p-3', position: 3 },
+      { id: 'p-1', name: 'Alice', position: 1 },
+      { id: 'p-2', name: 'Bob', position: 2 },
+      { id: 'p-3', name: 'Charlie', position: 3 },
     ]);
   });
 

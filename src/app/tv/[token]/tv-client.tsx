@@ -101,6 +101,7 @@ export function TvClient({
   // ─── Refs ─────────────────────────────────────────────────────────────────────
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingWinnerRef = useRef<PendingWinner | null>(null);
+  const pendingPlayerActiveRef = useRef<PlayerActivePayload | null>(null);
   const winnerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confettiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -330,7 +331,8 @@ export function TvClient({
             // Add any new entries not present in current state
             for (const [id, position] of updatedMap) {
               if (!updated.some((e) => e.id === id)) {
-                updated.push({ id, name: 'Player', position });
+                const nameFromPayload = latest.positions.find(p => p.id === id)?.name ?? 'Player';
+                updated.push({ id, name: nameFromPayload, position });
               }
             }
 
@@ -355,8 +357,20 @@ export function TvClient({
   useEffect(() => {
     if (tvState.phase === 'winner') {
       winnerTimeoutRef.current = setTimeout(() => {
-        setTvState({ phase: 'idle' });
-        setTargetIndex(null);
+        const pending = pendingPlayerActiveRef.current;
+        pendingPlayerActiveRef.current = null;
+        if (pending) {
+          activationCountRef.current += 1;
+          setActivationKey(activationCountRef.current);
+          nextSkipDelayMsRef.current = session.spin_timeout_seconds * 1000;
+          hasIncrementedForRecovery.current = false;
+          setQueue((q) => q.filter((e) => e.id !== pending.participant_id));
+          setTargetIndex(null);
+          setTvState({ phase: 'player_active', playerName: pending.name, participantId: pending.participant_id });
+        } else {
+          setTvState({ phase: 'idle' });
+          setTargetIndex(null);
+        }
       }, 10_000);
     }
     return () => {
@@ -365,7 +379,7 @@ export function TvClient({
         winnerTimeoutRef.current = null;
       }
     };
-  }, [tvState.phase]);
+  }, [tvState.phase, session.spin_timeout_seconds]);
 
   // ─── Reset confetti after 1 second ────────────────────────────────────────────
   useEffect(() => {
@@ -435,18 +449,25 @@ export function TvClient({
 
   // ─── Realtime event handlers ──────────────────────────────────────────────────
   const handlePlayerActive = useCallback((payload: PlayerActivePayload) => {
-    activationCountRef.current += 1;
-    setActivationKey(activationCountRef.current);
-    // Reset the skip delay to full duration — the corrected remaining-time value
-    // from page-load recovery only applies once.
-    nextSkipDelayMsRef.current = session.spin_timeout_seconds * 1000;
-    // Allow syncState to increment activationKey again if this player is still
-    // active during a future visibility-change recovery.
-    hasIncrementedForRecovery.current = false;
-    setTvState({ phase: 'player_active', playerName: payload.name, participantId: payload.participant_id });
-    setTargetIndex(null);
-    // Remove the promoted player from the queue display
-    setQueue((prev) => prev.filter((q) => q.id !== payload.participant_id));
+    let buffered = false;
+    setTvState((prev) => {
+      if (prev.phase === 'spinning' || prev.phase === 'winner') {
+        // Buffer — wheel is animating or winner overlay is showing
+        pendingPlayerActiveRef.current = payload;
+        buffered = true;
+        return prev;
+      }
+      return { phase: 'player_active', playerName: payload.name, participantId: payload.participant_id };
+    });
+    // Side effects only when not buffered
+    if (!buffered) {
+      activationCountRef.current += 1;
+      setActivationKey(activationCountRef.current);
+      nextSkipDelayMsRef.current = session.spin_timeout_seconds * 1000;
+      hasIncrementedForRecovery.current = false;
+      setTargetIndex(null);
+      setQueue((prev) => prev.filter((q) => q.id !== payload.participant_id));
+    }
   }, [session.spin_timeout_seconds]);
 
   const handleQueueUpdated = useCallback((payload: QueueUpdatedPayload) => {
@@ -469,10 +490,11 @@ export function TvClient({
         })
         .filter((entry) => updatedMap.has(entry.id));
 
-      // Add any new entries we don't have yet (names will show as "Player" until next recovery)
+      // Add any new entries we don't have yet
       for (const [id, position] of updatedMap) {
         if (!updated.some((e) => e.id === id)) {
-          updated.push({ id, name: 'Player', position });
+          const nameFromPayload = payload.positions.find(p => p.id === id)?.name ?? 'Player';
+          updated.push({ id, name: nameFromPayload, position });
         }
       }
 

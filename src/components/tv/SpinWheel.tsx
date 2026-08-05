@@ -58,7 +58,7 @@ export default function SpinWheel({
       {/* Logo centered on wheel */}
       <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
         <Image
-          src="/logo/utsav_logo.png"
+          src="/logo/utsav_dj_logo.png"
           alt="Logo"
           width={60}
           height={60}

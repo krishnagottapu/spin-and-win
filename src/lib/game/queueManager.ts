@@ -63,10 +63,10 @@ export async function promoteNextParticipant(
 export async function getQueuePositions(
   supabase: SupabaseClient,
   sessionId: string
-): Promise<Array<{ id: string; position: number }>> {
+): Promise<Array<{ id: string; name: string; position: number }>> {
   const { data } = await supabase
     .from('participants')
-    .select('id, queue_position')
+    .select('id, name, queue_position')
     .eq('session_id', sessionId)
     .eq('status', 'queued')
     .order('queue_position', { ascending: true });
@@ -75,6 +75,7 @@ export async function getQueuePositions(
 
   return data.map((row, index) => ({
     id: row.id as string,
+    name: row.name as string,
     position: index + 1,
   }));
 }
