@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
     if (sessionError) {
       console.error('[POST /api/sessions] session insert', sessionError);
       return NextResponse.json(
-        { error: 'Failed to create session' },
+        { error: 'Failed to create session', detail: sessionError.message },
         { status: 500 }
       );
     }

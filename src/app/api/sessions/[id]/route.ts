@@ -273,7 +273,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (updateError) {
       console.error('[PUT /api/sessions/[id]] update', updateError);
       return NextResponse.json(
-        { error: 'Failed to update session' },
+        { error: 'Failed to update session', detail: updateError.message },
         { status: 500 }
       );
     }
@@ -287,9 +287,31 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       .not('prize_id', 'is', null);
 
     if (referencedCount && referencedCount > 0) {
-      // Participants have already won prizes — cannot replace prize list.
-      // Just update existing prize metadata (name, weight, inventory) where possible.
-      // Return current prizes without modification.
+      // Participants have already won prizes — cannot delete/recreate the prize list
+      // because the FK from participants.prize_id would break.
+      // Instead, update each existing prize's editable fields (name, weight, inventory)
+      // by matching on their order (position in the list).
+      const { data: existingPrizes } = await supabase
+        .from('prizes')
+        .select('id')
+        .eq('session_id', params.id)
+        .order('created_at', { ascending: true });
+
+      if (existingPrizes && existingPrizes.length > 0) {
+        for (let i = 0; i < Math.min(existingPrizes.length, body.prizes.length); i++) {
+          const incoming = body.prizes[i];
+          await supabase
+            .from('prizes')
+            .update({
+              name: incoming.name,
+              weight: incoming.weight,
+              inventory_count: incoming.inventory_count,
+              is_no_prize: incoming.is_no_prize ?? false,
+            })
+            .eq('id', existingPrizes[i].id);
+        }
+      }
+
       const { data: currentPrizes } = await supabase
         .from('prizes')
         .select('*')
