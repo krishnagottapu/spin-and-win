@@ -93,6 +93,7 @@ export function TvClient({
   const [targetIndex, setTargetIndex] = useState<number | null>(null);
   const [recovering, setRecovering] = useState(true);
   const [queue, setQueue] = useState<QueueEntry[]>(initialQueue);
+  const [activationKey, setActivationKey] = useState(0);
 
   // ─── Refs ─────────────────────────────────────────────────────────────────────
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -102,6 +103,9 @@ export function TvClient({
   const autoSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timesUpOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFlickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Incremented every time a player becomes active — used as the timer key so a
+  // returning player (same participantId) still gets a fresh countdown.
+  const activationCountRef = useRef<number>(0);
   const recoveringRef = useRef(true);
   const pendingQueueUpdatesRef = useRef<QueueUpdatedPayload[]>([]);
 
@@ -151,7 +155,7 @@ export function TvClient({
   // Depend only on the fields that identify a new active player turn, not the
   // whole tvState object — prevents the effect re-firing on unrelated state changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tvState.phase, (tvState as { participantId?: string }).participantId, session.id, session.tv_token, session.spin_timeout_seconds]);
+  }, [tvState.phase, activationKey, session.id, session.tv_token, session.spin_timeout_seconds]);
 
   // ─── Preload sound on mount + unlock audio on first user interaction ────────
   useEffect(() => {
@@ -358,6 +362,8 @@ export function TvClient({
 
   // ─── Realtime event handlers ──────────────────────────────────────────────────
   const handlePlayerActive = useCallback((payload: PlayerActivePayload) => {
+    activationCountRef.current += 1;
+    setActivationKey(activationCountRef.current);
     setTvState({ phase: 'player_active', playerName: payload.name, participantId: payload.participant_id });
     setTargetIndex(null);
     // Remove the promoted player from the queue display
@@ -626,7 +632,7 @@ export function TvClient({
             <div className="mt-4 flex flex-col items-center gap-4">
               {tvState.phase === 'player_active' && (
                 <SpinCountdownTimer
-                  key={tvState.participantId}
+                  key={activationKey}
                   durationSeconds={session.spin_timeout_seconds}
                   size="lg"
                 />
