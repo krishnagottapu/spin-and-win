@@ -266,6 +266,24 @@ export default function PlayClient({
         setState({ phase: 'spin', participantId: payload.participant_id });
       }
     },
+    onPlayerSkipped: (payload) => {
+      // If this player was skipped (timed out), transition back to queue.
+      // The queue:updated event that follows will set the correct position.
+      // Position 0 and estimatedWait 0 are placeholders — corrected immediately
+      // by the onQueueUpdated handler which fires right after player:skipped.
+      if (payload.participant_id !== participantId) return;
+      activatedAtRef.current = 0;
+      setState((prev) => {
+        // Only transition out of spin phase — if already in queue or result, leave it
+        if (prev.phase !== 'spin') return prev;
+        return {
+          phase: 'queue',
+          position: 0,
+          estimatedWait: 0,
+          participantId: participantId!,
+        };
+      });
+    },
     onSpinResult: (payload) => {
       if (payload.participant_id === participantId) {
         // Delay result to match TV wheel animation (8 seconds from spin start)

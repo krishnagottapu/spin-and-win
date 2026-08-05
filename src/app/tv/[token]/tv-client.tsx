@@ -137,6 +137,13 @@ export function TvClient({
             });
           } catch (err) {
             console.error('[TvClient] auto-skip failed:', err);
+          } finally {
+            // Always clear the times_up overlay. If a player:active or player:skipped
+            // Realtime event already advanced the phase, the functional update is a no-op.
+            setTvState((prev) => {
+              if (prev.phase === 'times_up') return { phase: 'idle' };
+              return prev;
+            });
           }
         }, 1500);
       }, session.spin_timeout_seconds * 1000);
@@ -239,9 +246,19 @@ export function TvClient({
           setWinners(data.winners);
         }
 
-        // Refresh prize names in case they were edited while the TV was live
+        // Refresh prize names — but NOT while a spin is in progress.
+        // If the wheel is spinning, buffer the update; handleStopSpinning will apply it.
         if (data.session.prizes && data.session.prizes.length > 0) {
-          setPrizes(data.session.prizes.map((p) => ({ name: p.name })));
+          const mapped = data.session.prizes.map((p) => ({ name: p.name }));
+          setTvState((prev) => {
+            if (prev.phase === 'spinning') {
+              // Buffer — do not update prizes mid-spin
+              pendingPrizesRef.current = mapped;
+            } else {
+              setPrizes(mapped);
+            }
+            return prev; // No state change — side effect only
+          });
         }
 
         // Replace queue with the authoritative list from the server
@@ -335,6 +352,9 @@ export function TvClient({
   // ─── Pending winner announcements queue (deferred until wheel stops) ─────────
   const pendingAnnouncementsRef = useRef<WinnerAnnouncedPayload[]>([]);
 
+  // ─── Pending prize update — buffered while spinning to prevent mid-spin mismatch ──
+  const pendingPrizesRef = useRef<Array<{ name: string }> | null>(null);
+
   // ─── Wheel stop callback ──────────────────────────────────────────────────────
   const handleStopSpinning = useCallback(() => {
     const pending = pendingWinnerRef.current;
@@ -349,6 +369,12 @@ export function TvClient({
         setFireConfetti(true);
       }
       pendingWinnerRef.current = null;
+    }
+
+    // Apply any prize update that was buffered during the spin
+    if (pendingPrizesRef.current !== null) {
+      setPrizes(pendingPrizesRef.current);
+      pendingPrizesRef.current = null;
     }
 
     // Add winner(s) to leaderboard AFTER wheel stops
@@ -595,7 +621,7 @@ export function TvClient({
 
         {/* Main content — QR left + wheel center + leaderboard right */}
         <div className="flex min-h-0 flex-1">
-          {/* Left sidebar — QR code (top) + Queue (below) */}
+          {/* Left sidebar — QR code (top) + Timer (middle) + Queue (below) */}
           <div className="flex w-[260px] shrink-0 flex-col border-r border-gray-800">
             {/* QR Code section — compact at top */}
             <div className="shrink-0 border-b border-gray-800 p-3 text-center">
@@ -611,6 +637,17 @@ export function TvClient({
               </div>
               <p className="mt-2 max-w-[200px] mx-auto text-center text-[10px] text-gray-500">{joinUrl}</p>
             </div>
+
+            {/* Countdown timer — visible only during player_active phase */}
+            {tvState.phase === 'player_active' && (
+              <div className="shrink-0 border-b border-gray-800 p-3 flex justify-center">
+                <SpinCountdownTimer
+                  key={activationKey}
+                  durationSeconds={session.spin_timeout_seconds}
+                  size="lg"
+                />
+              </div>
+            )}
 
             {/* Queue display — fills remaining space */}
             <div className="min-h-0 flex-1 overflow-hidden p-3">
@@ -634,15 +671,8 @@ export function TvClient({
               targetIndex={targetIndex}
               onStopSpinning={handleStopSpinning}
             />
-            {/* Countdown timer (only during player_active phase) + active player banner */}
-            <div className="mt-4 flex flex-col items-center gap-4">
-              {tvState.phase === 'player_active' && (
-                <SpinCountdownTimer
-                  key={activationKey}
-                  durationSeconds={session.spin_timeout_seconds}
-                  size="lg"
-                />
-              )}
+            {/* Active player banner below the wheel */}
+            <div className="mt-4 flex flex-col items-center">
               <ActivePlayerBanner playerName={currentPlayerName} />
             </div>
           </div>
