@@ -5,6 +5,7 @@ import RegistrationForm from '@/components/play/RegistrationForm';
 import QueuePosition from '@/components/play/QueuePosition';
 import SpinButton from '@/components/play/SpinButton';
 import ResultDisplay from '@/components/play/ResultDisplay';
+import SpinCountdownTimer from '@/components/tv/SpinCountdownTimer';
 import { useSessionChannel } from '@/lib/supabase/realtime';
 import type { QueueJoinResponse, QueueStatusResponse, SpinResponse } from '@/lib/types';
 
@@ -67,6 +68,7 @@ interface PlayClientProps {
   endTime: string;
   eventName: string;
   otpEnabled: boolean;
+  spinTimeoutSeconds: number;
 }
 
 export default function PlayClient({
@@ -76,10 +78,12 @@ export default function PlayClient({
   endTime,
   eventName,
   otpEnabled,
+  spinTimeoutSeconds,
 }: PlayClientProps) {
   const [state, setState] = useState<PlayState>({ phase: 'loading' });
   const [participantId, setParticipantId] = useState<string | null>(null);
   const spinStartTimeRef = useRef<number>(0);
+  const activatedAtRef = useRef<number>(0);
 
   // Initial mount: check sessionStorage and recover state
   useEffect(() => {
@@ -254,6 +258,10 @@ export default function PlayClient({
       }
     },
     onPlayerActive: (payload) => {
+      // Record when the active player's turn started.
+      // Used by queued players to show the correct remaining time on their timer.
+      activatedAtRef.current = Date.now();
+
       if (payload.participant_id === participantId) {
         setState({ phase: 'spin', participantId: payload.participant_id });
       }
@@ -327,10 +335,28 @@ export default function PlayClient({
         </MobileShell>
       );
 
-    case 'queue':
+    case 'queue': {
+      // Compute remaining seconds for the queued timer.
+      // If we have an activation timestamp (player:active was received), derive remaining time.
+      // If not (session recovery path where activatedAtRef is 0), start from full duration.
+      const queueTimerInitialSeconds =
+        activatedAtRef.current > 0
+          ? Math.max(
+              0,
+              spinTimeoutSeconds -
+                Math.floor((Date.now() - activatedAtRef.current) / 1000)
+            )
+          : spinTimeoutSeconds;
+
       return (
         <MobileShell eventName={eventName}>
-          <div className="flex flex-1 flex-col items-center justify-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-4">
+            <SpinCountdownTimer
+              key={activatedAtRef.current}
+              durationSeconds={spinTimeoutSeconds}
+              initialSeconds={queueTimerInitialSeconds}
+              size="sm"
+            />
             <QueuePosition
               position={state.position}
               estimatedWait={state.estimatedWait}
@@ -338,11 +364,12 @@ export default function PlayClient({
           </div>
         </MobileShell>
       );
+    }
 
     case 'spin':
       return (
         <MobileShell eventName={eventName}>
-          <div className="flex flex-1 flex-col items-center justify-center px-4">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 gap-4">
             {state.error && (
               <div className="mb-4 rounded-lg bg-red-900/50 px-4 py-3 text-center text-white">
                 <p>{state.error}</p>
@@ -354,6 +381,11 @@ export default function PlayClient({
                 </button>
               </div>
             )}
+            <SpinCountdownTimer
+              key={state.participantId}
+              durationSeconds={spinTimeoutSeconds}
+              size="sm"
+            />
             <SpinButton
               sessionId={sessionId}
               participantId={state.participantId}

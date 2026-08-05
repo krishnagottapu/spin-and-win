@@ -331,9 +331,9 @@ describe('getQueuePositions', () => {
     );
 
     expect(positions).toEqual([
-      { id: 'p-1', position: 2 },
-      { id: 'p-2', position: 3 },
-      { id: 'p-3', position: 4 },
+      { id: 'p-1', position: 1 },
+      { id: 'p-2', position: 2 },
+      { id: 'p-3', position: 3 },
     ]);
   });
 

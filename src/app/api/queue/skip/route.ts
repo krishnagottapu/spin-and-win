@@ -132,7 +132,40 @@ export async function POST(request: NextRequest) {
     }
 
     if (newPosition === -1) {
-      // Already processed (idempotency check from RPC)
+      // The RPC found no participant with status = 'active'.
+      // This usually means the player transitioned to 'spinning' before the timer fired.
+      // The spin will advance the queue when it completes — but as a safety net,
+      // check whether the queue is stuck (no active or spinning player at all).
+      const { data: activeOrSpinning } = await supabase
+        .from('participants')
+        .select('id')
+        .eq('session_id', session_id)
+        .in('status', ['active', 'spinning'])
+        .limit(1);
+
+      if (!activeOrSpinning || activeOrSpinning.length === 0) {
+        // Dead queue: no one is active or spinning, but queued players may exist.
+        // Promote the next participant so the queue can continue.
+        const { promoted } = await promoteNextParticipant(
+          supabase,
+          session_id,
+          typedSession.status
+        );
+        if (promoted) {
+          const playerActivePayload: PlayerActivePayload = {
+            participant_id: promoted.id,
+            name: promoted.name,
+            position: promoted.queue_position,
+          };
+          await broadcastEvent(session_id, 'player:active', playerActivePayload);
+
+          const positions = await getQueuePositions(supabase, session_id);
+          const queueUpdatedPayload: QueueUpdatedPayload = { positions };
+          await broadcastEvent(session_id, 'queue:updated', queueUpdatedPayload);
+        }
+      }
+      // In either case, return already_processed — the original targeted participant
+      // was not re-queued by this request.
       return NextResponse.json(
         { skipped: null, reason: 'already_processed' },
         { status: 200 }

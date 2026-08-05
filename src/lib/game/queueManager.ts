@@ -73,8 +73,8 @@ export async function getQueuePositions(
 
   if (!data) return [];
 
-  return data.map((row) => ({
+  return data.map((row, index) => ({
     id: row.id as string,
-    position: row.queue_position as number,
+    position: index + 1,
   }));
 }

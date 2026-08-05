@@ -18,6 +18,7 @@ function createMockSupabase(config: {
   maxPosition?: { data: object | null; error: object | null };
   activeCheck?: { data: object[] | null; error: object | null };
   insert?: { data: object | null; error: object | null };
+  queuePositions?: { data: object[] | null; error: object | null };
 }) {
   let participantCallIndex = 0;
 
@@ -37,6 +38,8 @@ function createMockSupabase(config: {
             return createChainableInQuery(config.activeCheck ?? { data: [], error: null });
           case 4: // Insert
             return createChainableInsert(config.insert ?? { data: { id: 'p-1', status: 'active', queue_position: 1 }, error: null });
+          case 5: // getQueuePositions call
+            return createChainableList(config.queuePositions ?? { data: [], error: null });
           default:
             return createChainable({ data: null, error: null });
         }
@@ -63,6 +66,17 @@ function createChainableWithOrder(resolution: { data: object | null; error: obje
   chain.select = vi.fn().mockReturnValue(chain);
   chain.eq = vi.fn().mockReturnValue(chain);
   chain.order = vi.fn().mockReturnValue(chain);
+  chain.limit = vi.fn().mockReturnValue(chain);
+  chain.single = vi.fn().mockResolvedValue(resolution);
+  return chain;
+}
+
+function createChainableList(resolution: { data: object[] | null; error: object | null }) {
+  // For queries that resolve after .order() without .single()
+  const chain: Record<string, unknown> = {};
+  chain.select = vi.fn().mockReturnValue(chain);
+  chain.eq = vi.fn().mockReturnValue(chain);
+  chain.order = vi.fn().mockResolvedValue(resolution);
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.single = vi.fn().mockResolvedValue(resolution);
   return chain;
@@ -152,7 +166,7 @@ describe('POST /api/queue/join', () => {
     expect(data.estimated_wait_seconds).toBe(0);
   });
 
-  it('second registrant gets status=queued, queue_position=2', async () => {
+  it('second registrant gets status=queued, queue_position=1 (rank)', async () => {
     mockSupabaseInstance = createMockSupabase({
       sessionLookup: { data: activeSession, error: null },
       phoneCheck: { data: null, error: { code: 'PGRST116' } },
@@ -162,6 +176,7 @@ describe('POST /api/queue/join', () => {
         data: { id: 'participant-2', status: 'queued', queue_position: 2 },
         error: null,
       },
+      queuePositions: { data: [{ id: 'participant-2', queue_position: 2 }], error: null },
     });
 
     const req = makeRequest({
@@ -176,8 +191,8 @@ describe('POST /api/queue/join', () => {
     expect(res.status).toBe(201);
     expect(data.participant_id).toBe('participant-2');
     expect(data.status).toBe('queued');
-    expect(data.queue_position).toBe(2);
-    expect(data.estimated_wait_seconds).toBe(60);
+    expect(data.queue_position).toBe(1);
+    expect(data.estimated_wait_seconds).toBe(0);
   });
 
   it('duplicate phone returns 409', async () => {
@@ -323,5 +338,35 @@ describe('POST /api/queue/join', () => {
 
     const res = await POST(req);
     expect(res.status).toBe(201);
+  });
+
+  it('20th overall participant who is only queued player sees rank 1', async () => {
+    // Simulate: 19 players have already joined and completed their turns.
+    // The 20th player joins and is assigned queue_position = 20.
+    // But they should see rank 1 because they are the only queued player.
+    mockSupabaseInstance = createMockSupabase({
+      sessionLookup: { data: activeSession, error: null },
+      phoneCheck: { data: null, error: { code: 'PGRST116' } },
+      maxPosition: { data: { queue_position: 19 }, error: null },
+      activeCheck: { data: [{ id: 'current-active' }], error: null },
+      insert: {
+        data: { id: 'participant-20', status: 'queued', queue_position: 20 },
+        error: null,
+      },
+      queuePositions: { data: [{ id: 'participant-20', queue_position: 20 }], error: null },
+    });
+
+    const req = makeRequest({
+      session_id: 'session-uuid-1',
+      name: 'Zara',
+      phone: '3035559999',
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(data.queue_position).toBe(1);         // rank, not raw DB value 20
+    expect(data.estimated_wait_seconds).toBe(0); // rank 1 = next up, 0 seconds
   });
 });

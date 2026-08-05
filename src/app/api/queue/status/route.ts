@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { getQueuePositions } from '@/lib/game/queueManager';
 import type { QueueStatusResponse, ApiError } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
@@ -47,14 +48,19 @@ export async function GET(request: NextRequest) {
     const prizeRaw = participant.prizes as { name: string; is_no_prize: boolean } | { name: string; is_no_prize: boolean }[] | null;
     const prizeData = Array.isArray(prizeRaw) ? prizeRaw[0] ?? null : prizeRaw;
 
+    // Compute display rank for queued participants
+    let displayRank: number | null = null;
+    if (participant.status === 'queued') {
+      const positions = await getQueuePositions(supabase, sessionId);
+      const myEntry = positions.find((p) => p.id === (participant.id as string));
+      displayRank = myEntry?.position ?? null;
+    }
+
     const response: QueueStatusResponse = {
       participant_id: participant.id,
       status: participant.status,
-      queue_position: participant.status === 'queued' ? participant.queue_position : null,
-      estimated_wait_seconds:
-        participant.status === 'queued'
-          ? (participant.queue_position - 1) * 60
-          : null,
+      queue_position: displayRank,
+      estimated_wait_seconds: displayRank !== null ? (displayRank - 1) * 60 : null,
       prize_name: prizeData?.name ?? null,
       is_no_prize: prizeData?.is_no_prize ?? null,
       result_token: participant.result_token,

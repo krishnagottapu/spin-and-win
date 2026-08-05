@@ -30,14 +30,17 @@ vi.mock('@/lib/auth/middleware', () => ({
  *   2. sessions.select().eq(id).single() — session validation
  *   3. participants.select(*).eq(session_id).eq(status,'active').limit(1).single() — find active player
  *   4. supabase.rpc('requeue_skipped_participant', ...) — atomic requeue
+ *   5. (if RPC returns -1) participants.select('id').eq(session_id).in(status, [...]).limit(1) — dead-queue check
  */
 function createMockSupabase(config: {
   tokenLookup?: { data: object | null; error: object | null };
   sessionLookup: { data: object | null; error: object | null };
   activePlayer?: { data: object | null; error: object | null };
   rpcResult?: { data: number | null; error: object | null };
+  activeOrSpinningCheck?: { data: object[] | null; error: object | null };
 }) {
   let sessionCallIndex = 0;
+  let participantCallIndex = 0;
 
   return {
     from: (table: string) => {
@@ -55,7 +58,15 @@ function createMockSupabase(config: {
         return createChainable(config.sessionLookup);
       }
       if (table === 'participants') {
-        return createChainableWithLimit(config.activePlayer ?? { data: null, error: { code: 'PGRST116' } });
+        participantCallIndex++;
+        if (participantCallIndex === 1) {
+          // First participants query: find active player
+          return createChainableWithLimit(config.activePlayer ?? { data: null, error: { code: 'PGRST116' } });
+        }
+        // Second participants query: dead-queue check (RPC returned -1)
+        // Default: return a non-empty array (spinning player exists → no promotion)
+        const checkResult = config.activeOrSpinningCheck ?? { data: [{ id: 'existing-player' }], error: null };
+        return createChainableArrayResult(checkResult);
       }
       return createChainable({ data: null, error: null });
     },
@@ -79,12 +90,74 @@ function createChainableWithLimit(resolution: { data: object | null; error: obje
   const chain: Record<string, unknown> = {};
   chain.select = vi.fn().mockReturnValue(chain);
   chain.eq = vi.fn().mockReturnValue(chain);
+  chain.in = vi.fn().mockReturnValue(chain);
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.single = vi.fn().mockResolvedValue(resolution);
   return chain;
 }
 
-let mockSupabaseInstance: ReturnType<typeof createMockSupabase>;
+/**
+ * Variant of createMockSupabase that supports the dead-queue check path.
+ * When RPC returns -1, the skip route queries participants with
+ * .in('status', ['active', 'spinning']) — this helper lets tests control that result.
+ */
+function createMockSupabaseWithSpinningRace(config: {
+  tokenLookup?: { data: object | null; error: object | null };
+  sessionLookup: { data: object | null; error: object | null };
+  activePlayer?: { data: object | null; error: object | null };
+  rpcResult?: { data: number | null; error: object | null };
+  activeOrSpinningCheck: { data: object[] | null; error: object | null };
+}) {
+  let sessionCallIndex = 0;
+  let participantCallIndex = 0;
+
+  return {
+    from: (table: string) => {
+      if (table === 'sessions') {
+        sessionCallIndex++;
+        if (sessionCallIndex === 1 && config.tokenLookup) {
+          return createChainable(config.tokenLookup);
+        }
+        if (sessionCallIndex === 1 && !config.tokenLookup) {
+          return createChainable(config.sessionLookup);
+        }
+        return createChainable(config.sessionLookup);
+      }
+      if (table === 'participants') {
+        participantCallIndex++;
+        if (participantCallIndex === 1) {
+          // First participants query: find active player
+          return createChainableWithLimit(config.activePlayer ?? { data: null, error: { code: 'PGRST116' } });
+        }
+        // Second participants query: dead-queue check (.in('status', [...]).limit(1))
+        // This query does NOT call .single() — it returns an array via the await on limit()
+        return createChainableArrayResult(config.activeOrSpinningCheck);
+      }
+      return createChainable({ data: null, error: null });
+    },
+    rpc: vi.fn().mockResolvedValue(config.rpcResult ?? { data: -1, error: null }),
+  };
+}
+
+/**
+ * Creates a chainable mock that resolves to an array (no .single() call).
+ * The skip route's dead-queue check uses: .from().select().eq().in().limit()
+ * which resolves the promise at the end of the chain (implicit await).
+ */
+function createChainableArrayResult(resolution: { data: object[] | null; error: object | null }) {
+  const chain: Record<string, unknown> = {};
+  chain.select = vi.fn().mockReturnValue(chain);
+  chain.eq = vi.fn().mockReturnValue(chain);
+  chain.in = vi.fn().mockReturnValue(chain);
+  chain.order = vi.fn().mockReturnValue(chain);
+  chain.limit = vi.fn().mockResolvedValue(resolution);
+  chain.single = vi.fn().mockResolvedValue(resolution);
+  // Support direct then/await on the chain itself (for queries without .single())
+  chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(resolution).then(resolve);
+  return chain;
+}
+
+let mockSupabaseInstance: ReturnType<typeof createMockSupabase> | ReturnType<typeof createMockSupabaseWithSpinningRace>;
 
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => mockSupabaseInstance,
@@ -562,6 +635,141 @@ describe('POST /api/queue/skip', () => {
 
       expect(res.status).toBe(500);
       expect(data.error).toBe('Failed to skip participant');
+    });
+  });
+
+  // ─── 8. Spinning race condition (Bug 2) ─────────────────────────────────────
+
+  describe('Spinning race condition (Bug 2)', () => {
+    it('calls promoteNextParticipant when RPC returns -1 and no active/spinning player exists (dead queue)', async () => {
+      // Scenario: player tapped spin, status = 'spinning', timer fires, RPC returns -1.
+      // Then the spin also fails → no one is active or spinning → dead queue → must promote.
+      const promotedPlayer = {
+        id: 'participant-uuid-3',
+        name: 'Charlie',
+        queue_position: 3,
+        status: 'active',
+      };
+      mockPromoteNextParticipant.mockResolvedValueOnce({
+        promoted: promotedPlayer,
+        sessionEnded: false,
+      });
+
+      const positions = [{ id: 'participant-uuid-4', position: 1 }];
+      mockGetQueuePositions.mockResolvedValueOnce(positions);
+
+      mockSupabaseInstance = createMockSupabaseWithSpinningRace({
+        tokenLookup: { data: { id: 'session-uuid-1' }, error: null },
+        sessionLookup: { data: activeSession, error: null },
+        activePlayer: { data: activePlayer, error: null },
+        rpcResult: { data: -1, error: null },
+        activeOrSpinningCheck: { data: [], error: null }, // dead queue
+      });
+
+      const req = makeRequest({
+        session_id: 'session-uuid-1',
+        tv_token: 'valid-tv-token',
+        participant_id: 'participant-uuid-1',
+        reason: 'timeout',
+      });
+
+      const res = await POST(req);
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.reason).toBe('already_processed');
+
+      // promoteNextParticipant must have been called
+      expect(mockPromoteNextParticipant).toHaveBeenCalledWith(
+        mockSupabaseInstance,
+        'session-uuid-1',
+        'active'
+      );
+
+      // player:active must have been broadcast for the promoted player
+      expect(mockBroadcastEvent).toHaveBeenCalledWith(
+        'session-uuid-1',
+        'player:active',
+        {
+          participant_id: 'participant-uuid-3',
+          name: 'Charlie',
+          position: 3,
+        }
+      );
+
+      // queue:updated must have been broadcast
+      expect(mockBroadcastEvent).toHaveBeenCalledWith(
+        'session-uuid-1',
+        'queue:updated',
+        { positions }
+      );
+    });
+
+    it('does NOT call promoteNextParticipant when RPC returns -1 but a spinning player exists', async () => {
+      // Scenario: player is in 'spinning' status — the spin is in-flight.
+      // activeOrSpinning query returns one row → do not promote.
+      mockSupabaseInstance = createMockSupabaseWithSpinningRace({
+        tokenLookup: { data: { id: 'session-uuid-1' }, error: null },
+        sessionLookup: { data: activeSession, error: null },
+        activePlayer: { data: activePlayer, error: null },
+        rpcResult: { data: -1, error: null },
+        activeOrSpinningCheck: { data: [{ id: 'participant-uuid-1' }], error: null }, // spin in progress
+      });
+
+      const req = makeRequest({
+        session_id: 'session-uuid-1',
+        tv_token: 'valid-tv-token',
+        participant_id: 'participant-uuid-1',
+        reason: 'timeout',
+      });
+
+      const res = await POST(req);
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.reason).toBe('already_processed');
+
+      // promoteNextParticipant must NOT have been called
+      expect(mockPromoteNextParticipant).not.toHaveBeenCalled();
+    });
+
+    it('does NOT broadcast queue:updated when dead queue promotion finds no one to promote', async () => {
+      // Scenario: dead queue, but no queued participants either → promoted = null
+      mockPromoteNextParticipant.mockResolvedValueOnce({
+        promoted: null,
+        sessionEnded: false,
+      });
+
+      mockSupabaseInstance = createMockSupabaseWithSpinningRace({
+        tokenLookup: { data: { id: 'session-uuid-1' }, error: null },
+        sessionLookup: { data: activeSession, error: null },
+        activePlayer: { data: activePlayer, error: null },
+        rpcResult: { data: -1, error: null },
+        activeOrSpinningCheck: { data: [], error: null }, // dead queue
+      });
+
+      const req = makeRequest({
+        session_id: 'session-uuid-1',
+        tv_token: 'valid-tv-token',
+        participant_id: 'participant-uuid-1',
+        reason: 'timeout',
+      });
+
+      const res = await POST(req);
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.reason).toBe('already_processed');
+
+      // promoteNextParticipant was called (dead queue recovery)
+      expect(mockPromoteNextParticipant).toHaveBeenCalledWith(
+        mockSupabaseInstance,
+        'session-uuid-1',
+        'active'
+      );
+
+      // But no broadcasts because promoted = null
+      expect(mockBroadcastEvent).not.toHaveBeenCalled();
     });
   });
 });

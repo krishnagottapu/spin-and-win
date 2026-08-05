@@ -18,6 +18,7 @@ export interface Session {
   sound_preset: SoundPreset;
   tv_token: string;
   status: SessionStatus;
+  spin_timeout_seconds: number;
   created_at: string;
   updated_at: string;
 }
@@ -99,6 +100,7 @@ export interface CreateSessionRequest {
   otp_enabled?: boolean;
   theme: WheelTheme;
   sound_preset: SoundPreset;
+  spin_timeout_seconds?: number;
   prizes: CreatePrizeInput[];
 }
 

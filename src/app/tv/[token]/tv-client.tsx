@@ -9,6 +9,7 @@ import { ActivePlayerBanner } from '@/components/tv/ActivePlayerBanner';
 import { QueueDisplay } from '@/components/tv/QueueDisplay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import SimulationPanel from '@/components/tv/SimulationPanel';
+import SpinCountdownTimer from '@/components/tv/SpinCountdownTimer';
 import { useSessionChannel } from '@/lib/supabase/realtime';
 import type {
   WheelTheme,
@@ -35,6 +36,7 @@ const ConfettiOverlay = dynamic(
 type TvState =
   | { phase: 'idle' }
   | { phase: 'player_active'; playerName: string; participantId: string }
+  | { phase: 'times_up'; playerName: string }
   | { phase: 'spinning'; playerName: string; prizeIndex: number; participantId: string }
   | { phase: 'winner'; playerName: string; prizeName: string; isNoPrize: boolean }
   | { phase: 'ended' };
@@ -63,6 +65,7 @@ interface TvClientProps {
     theme: WheelTheme;
     sound_preset: SoundPreset;
     tv_token: string;
+    spin_timeout_seconds: number;
   };
   prizes: Array<{ name: string }>;
   winners: Array<{ name: string; prize_name: string; spin_completed_at: string }>;
@@ -101,28 +104,35 @@ export function TvClient({
   const recoveringRef = useRef(true);
   const pendingQueueUpdatesRef = useRef<QueueUpdatedPayload[]>([]);
 
-  // ─── Auto-skip: skip inactive active players after 30 seconds ──────────────
-  const AUTO_SKIP_DELAY_MS = 30_000;
-
+  // ─── Auto-skip: skip inactive active players after configured timeout ──────
   useEffect(() => {
     // Start auto-skip timer when a player becomes active
     if (tvState.phase === 'player_active') {
-      autoSkipTimerRef.current = setTimeout(async () => {
-        try {
-          await fetch('/api/queue/skip', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              session_id: session.id,
-              tv_token: session.tv_token,
-              participant_id: tvState.phase === 'player_active' ? tvState.participantId : undefined,
-              reason: 'timeout',
-            }),
-          });
-        } catch (err) {
-          console.error('[TvClient] auto-skip failed:', err);
-        }
-      }, AUTO_SKIP_DELAY_MS);
+      const participantId = tvState.participantId;
+      const playerName = tvState.playerName;
+
+      autoSkipTimerRef.current = setTimeout(() => {
+        // Step 1: Show "Time's up!" overlay
+        setTvState({ phase: 'times_up', playerName });
+
+        // Step 2: After 1.5 seconds, fire the skip
+        setTimeout(async () => {
+          try {
+            await fetch('/api/queue/skip', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: session.id,
+                tv_token: session.tv_token,
+                participant_id: participantId,
+                reason: 'timeout',
+              }),
+            });
+          } catch (err) {
+            console.error('[TvClient] auto-skip failed:', err);
+          }
+        }, 1500);
+      }, session.spin_timeout_seconds * 1000);
     }
 
     // Clear timer if player starts spinning, wins, or phase changes
@@ -132,7 +142,7 @@ export function TvClient({
         autoSkipTimerRef.current = null;
       }
     };
-  }, [tvState, session.id]);
+  }, [tvState, session.id, session.tv_token, session.spin_timeout_seconds]);
 
   // ─── Preload sound on mount + unlock audio on first user interaction ────────
   useEffect(() => {
@@ -382,7 +392,10 @@ export function TvClient({
     if (skipFlickerTimerRef.current) clearTimeout(skipFlickerTimerRef.current);
     skipFlickerTimerRef.current = setTimeout(() => {
       setTvState((prev) => {
-        if (prev.phase === 'player_active' && prev.playerName === payload.name) {
+        if (
+          (prev.phase === 'player_active' || prev.phase === 'times_up') &&
+          prev.playerName === payload.name
+        ) {
           return { phase: 'idle' };
         }
         return prev;
@@ -393,9 +406,14 @@ export function TvClient({
 
   const handleSpinStart = useCallback(
     (_payload: SpinStartPayload) => {
-      // Sound is played on spin:result when wheel starts visually spinning
+      // The active player has tapped spin. Cancel the auto-skip timer —
+      // the queue will advance naturally when the spin completes.
+      if (autoSkipTimerRef.current) {
+        clearTimeout(autoSkipTimerRef.current);
+        autoSkipTimerRef.current = null;
+      }
     },
-    []
+    [] // autoSkipTimerRef is a ref, no dependency needed
   );
 
   const handleSpinResult = useCallback((payload: SpinResultPayload) => {
@@ -523,6 +541,17 @@ export function TvClient({
         {/* Confetti overlay */}
         <ConfettiOverlay fire={fireConfetti} />
 
+        {/* "Time's up!" overlay */}
+        {tvState.phase === 'times_up' && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 animate-timesup">
+            <p className="text-9xl font-black text-red-500 drop-shadow-2xl">⏰</p>
+            <p className="mt-4 text-7xl font-black text-white drop-shadow-2xl">
+              Time&apos;s up!
+            </p>
+            <p className="mt-6 text-3xl text-gray-300">{tvState.playerName}</p>
+          </div>
+        )}
+
         {/* Winner reveal overlay */}
         {tvState.phase === 'winner' && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80">
@@ -584,8 +613,15 @@ export function TvClient({
               targetIndex={targetIndex}
               onStopSpinning={handleStopSpinning}
             />
-            {/* Active player banner */}
-            <div className="mt-4">
+            {/* Countdown timer (only during player_active phase) + active player banner */}
+            <div className="mt-4 flex flex-col items-center gap-4">
+              {tvState.phase === 'player_active' && (
+                <SpinCountdownTimer
+                  key={tvState.participantId}
+                  durationSeconds={session.spin_timeout_seconds}
+                  size="lg"
+                />
+              )}
               <ActivePlayerBanner playerName={currentPlayerName} />
             </div>
           </div>

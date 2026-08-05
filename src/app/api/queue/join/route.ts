@@ -152,8 +152,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const estimatedWaitSeconds = (nextPosition - 1) * 60;
-
     // Broadcast player:active if this participant was promoted immediately
     if (assignedStatus === 'active') {
       const playerActivePayload: PlayerActivePayload = {
@@ -169,10 +167,17 @@ export async function POST(request: NextRequest) {
     const queueUpdatedPayload: QueueUpdatedPayload = { positions };
     await broadcastEvent(session_id, 'queue:updated', queueUpdatedPayload);
 
+    // Derive the display rank for this participant from the positions list
+    const myEntry = positions.find((p) => p.id === participant.id);
+    // If participant was promoted directly to 'active', they won't be in the queued list.
+    // Fall back to position 1 / 0 wait seconds (correct for an immediately-active player).
+    const displayRank = myEntry?.position ?? 1;
+    const estimatedWaitSeconds = myEntry ? (displayRank - 1) * 60 : 0;
+
     const response: QueueJoinResponse = {
       participant_id: participant.id,
       status: participant.status,
-      queue_position: participant.queue_position,
+      queue_position: displayRank,
       estimated_wait_seconds: estimatedWaitSeconds,
     };
 

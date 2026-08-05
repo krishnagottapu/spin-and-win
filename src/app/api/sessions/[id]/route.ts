@@ -243,6 +243,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // Validate spin_timeout_seconds
+    const spinTimeout = body.spin_timeout_seconds ?? 30;
+    if (!Number.isInteger(spinTimeout) || spinTimeout < 10 || spinTimeout > 120) {
+      return NextResponse.json(
+        { error: 'spin_timeout_seconds must be an integer between 10 and 120' },
+        { status: 422 }
+      );
+    }
+
     // Update session
     const { data: session, error: updateError } = await supabase
       .from('sessions')
@@ -255,6 +264,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         otp_enabled: body.otp_enabled ?? true,
         theme: body.theme,
         sound_preset: body.sound_preset,
+        spin_timeout_seconds: spinTimeout,
       })
       .eq('id', params.id)
       .select()

@@ -99,6 +99,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate spin_timeout_seconds
+    const spinTimeout = body.spin_timeout_seconds ?? 30;
+    if (!Number.isInteger(spinTimeout) || spinTimeout < 10 || spinTimeout > 120) {
+      return NextResponse.json(
+        { error: 'spin_timeout_seconds must be an integer between 10 and 120' },
+        { status: 422 }
+      );
+    }
+
     const supabase = createServiceClient();
 
     // Generate slug — retry with incrementing suffix on collision
@@ -121,6 +130,7 @@ export async function POST(request: NextRequest) {
         otp_enabled: body.otp_enabled ?? true,
         theme: body.theme,
         sound_preset: body.sound_preset,
+        spin_timeout_seconds: spinTimeout,
         tv_token,
         status: 'draft',
       })

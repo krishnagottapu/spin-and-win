@@ -40,6 +40,9 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
   const [soundPreset, setSoundPreset] = useState<SoundPreset>(
     session?.sound_preset ?? 'drumroll'
   );
+  const [spinTimeoutSeconds, setSpinTimeoutSeconds] = useState(
+    session?.spin_timeout_seconds ?? 30
+  );
   const [prizes, setPrizes] = useState<CreatePrizeInput[]>(
     session?.prizes?.map((p) => ({
       name: p.name,
@@ -60,6 +63,14 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
 
     if (prizes.length === 0) {
       return 'At least one prize is required';
+    }
+
+    if (
+      !Number.isInteger(spinTimeoutSeconds) ||
+      spinTimeoutSeconds < 10 ||
+      spinTimeoutSeconds > 120
+    ) {
+      return 'Spin time limit must be between 10 and 120 seconds';
     }
 
     for (const prize of prizes) {
@@ -94,6 +105,7 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
         otp_enabled: otpEnabled,
         theme,
         sound_preset: soundPreset,
+        spin_timeout_seconds: spinTimeoutSeconds,
         prizes,
       };
 
@@ -201,6 +213,30 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
             }
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
+        </div>
+
+        <div>
+          <label
+            htmlFor="spin_timeout"
+            className="block text-sm font-medium text-gray-700"
+          >
+            Spin Time Limit (seconds)
+          </label>
+          <input
+            id="spin_timeout"
+            type="number"
+            min="10"
+            max="120"
+            step="1"
+            value={spinTimeoutSeconds}
+            onChange={(e) =>
+              setSpinTimeoutSeconds(parseInt(e.target.value, 10) || 30)
+            }
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            How long each player has to tap spin before being skipped (10–120 seconds)
+          </p>
         </div>
 
         <div>
