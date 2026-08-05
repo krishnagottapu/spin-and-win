@@ -100,6 +100,7 @@ export function TvClient({
   const winnerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confettiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timesUpOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFlickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveringRef = useRef(true);
   const pendingQueueUpdatesRef = useRef<QueueUpdatedPayload[]>([]);
@@ -116,7 +117,8 @@ export function TvClient({
         setTvState({ phase: 'times_up', playerName });
 
         // Step 2: After 1.5 seconds, fire the skip
-        setTimeout(async () => {
+        timesUpOverlayTimerRef.current = setTimeout(async () => {
+          timesUpOverlayTimerRef.current = null;
           try {
             await fetch('/api/queue/skip', {
               method: 'POST',
@@ -135,14 +137,21 @@ export function TvClient({
       }, session.spin_timeout_seconds * 1000);
     }
 
-    // Clear timer if player starts spinning, wins, or phase changes
+    // Clear both timers when the player_active phase ends (spin, skip, new player, etc.)
     return () => {
       if (autoSkipTimerRef.current) {
         clearTimeout(autoSkipTimerRef.current);
         autoSkipTimerRef.current = null;
       }
+      if (timesUpOverlayTimerRef.current) {
+        clearTimeout(timesUpOverlayTimerRef.current);
+        timesUpOverlayTimerRef.current = null;
+      }
     };
-  }, [tvState, session.id, session.tv_token, session.spin_timeout_seconds]);
+  // Depend only on the fields that identify a new active player turn, not the
+  // whole tvState object — prevents the effect re-firing on unrelated state changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tvState.phase, (tvState as { participantId?: string }).participantId, session.id, session.tv_token, session.spin_timeout_seconds]);
 
   // ─── Preload sound on mount + unlock audio on first user interaction ────────
   useEffect(() => {
