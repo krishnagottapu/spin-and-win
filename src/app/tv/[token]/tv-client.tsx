@@ -75,7 +75,7 @@ interface TvClientProps {
 
 export function TvClient({
   session,
-  prizes,
+  prizes: initialPrizes,
   winners: initialWinners,
   activePlayerName,
   initialQueue,
@@ -88,6 +88,7 @@ export function TvClient({
       ? { phase: 'player_active', playerName: activePlayerName, participantId: '' }
       : { phase: 'idle' }
   );
+  const [prizes, setPrizes] = useState(initialPrizes);
   const [winners, setWinners] = useState(initialWinners);
   const [fireConfetti, setFireConfetti] = useState(false);
   const [targetIndex, setTargetIndex] = useState<number | null>(null);
@@ -207,7 +208,7 @@ export function TvClient({
         if (!res.ok) return;
 
         const data = await res.json() as {
-          session: { status: string };
+          session: { status: string; prizes?: Array<{ name: string; is_no_prize: boolean }> };
           active_participant: { id: string; name: string; status: string; queue_position: number } | null;
           last_winner: { id: string; name: string; prize_name: string; is_no_prize: boolean; spin_completed_at: string } | null;
           winners?: Array<{ name: string; prize_name: string; spin_completed_at: string }>;
@@ -236,6 +237,11 @@ export function TvClient({
         // Replace winners list with the full authoritative list from the server
         if (data.winners) {
           setWinners(data.winners);
+        }
+
+        // Refresh prize names in case they were edited while the TV was live
+        if (data.session.prizes && data.session.prizes.length > 0) {
+          setPrizes(data.session.prizes.map((p) => ({ name: p.name })));
         }
 
         // Replace queue with the authoritative list from the server

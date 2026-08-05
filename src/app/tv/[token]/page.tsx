@@ -5,6 +5,9 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { TvClient } from '@/app/tv/[token]/tv-client';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 
+// Always fetch fresh data — prize names and session config can change while the TV is live.
+export const dynamic = 'force-dynamic';
+
 interface TvPageProps {
   params: { token: string };
 }
