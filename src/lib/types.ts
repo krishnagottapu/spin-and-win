@@ -14,6 +14,7 @@ export interface Session {
   max_spins_per_user: number;
   include_no_prize: boolean;
   otp_enabled: boolean;
+  queue_enabled: boolean; // true = queue mode (default), false = walk-up mode
   theme: WheelTheme;
   sound_preset: SoundPreset;
   tv_token: string;
@@ -101,6 +102,7 @@ export interface CreateSessionRequest {
   theme: WheelTheme;
   sound_preset: SoundPreset;
   spin_timeout_seconds?: number;
+  queue_enabled?: boolean; // defaults to true on the server if omitted
   prizes: CreatePrizeInput[];
 }
 
@@ -132,6 +134,11 @@ export interface QueueStatusResponse {
   result_token: string | null;
   is_fulfilled: boolean | null;
   fulfilled_at: string | null;
+}
+
+export interface SlotStatusResponse {
+  slot_occupied: boolean; // true if any participant is active or spinning
+  queue_enabled: boolean; // false indicates walk-up mode
 }
 
 export interface SpinRequest {

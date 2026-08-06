@@ -13,7 +13,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
 
   const { data: session, error } = await supabase
     .from('sessions')
-    .select('id, slug, status, end_time, event_name, otp_enabled, spin_timeout_seconds')
+    .select('id, slug, status, end_time, event_name, otp_enabled, spin_timeout_seconds, queue_enabled')
     .eq('slug', slug)
     .single();
 
@@ -42,6 +42,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
         eventName={session.event_name}
         otpEnabled={session.otp_enabled ?? true}
         spinTimeoutSeconds={session.spin_timeout_seconds ?? 30}
+        queueEnabled={session.queue_enabled ?? true}
       />
     </ErrorBoundary>
   );

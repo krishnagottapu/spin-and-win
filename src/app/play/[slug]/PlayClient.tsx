@@ -55,6 +55,7 @@ function MobileShell({ children, eventName }: { children: ReactNode; eventName: 
 type PlayState =
   | { phase: 'loading' }
   | { phase: 'closed' }
+  | { phase: 'holding'; slotJustOpened?: boolean }
   | { phase: 'register' }
   | { phase: 'queue'; position: number; estimatedWait: number; participantId: string }
   | { phase: 'spin'; participantId: string; playerName: string; error?: string }
@@ -69,6 +70,7 @@ interface PlayClientProps {
   eventName: string;
   otpEnabled: boolean;
   spinTimeoutSeconds: number;
+  queueEnabled: boolean;
 }
 
 export default function PlayClient({
@@ -79,11 +81,35 @@ export default function PlayClient({
   eventName,
   otpEnabled,
   spinTimeoutSeconds,
+  queueEnabled,
 }: PlayClientProps) {
   const [state, setState] = useState<PlayState>({ phase: 'loading' });
   const [participantId, setParticipantId] = useState<string | null>(null);
   const spinStartTimeRef = useRef<number>(0);
   const activatedAtRef = useRef<number>(0);
+  const isHoldingRef = useRef<boolean>(false);
+
+  // Keep isHoldingRef in sync with state phase
+  useEffect(() => {
+    isHoldingRef.current = state.phase === 'holding';
+  }, [state.phase]);
+
+  // Walk-up mode: check slot availability
+  const checkSlot = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/queue/slot?sessionId=${encodeURIComponent(sessionId)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.slot_occupied) {
+          setState({ phase: 'holding', slotJustOpened: true });
+        }
+      }
+    } catch {
+      // Leave state unchanged on error
+    }
+  }, [sessionId]);
 
   // Initial mount: check sessionStorage and recover state
   useEffect(() => {
@@ -101,7 +127,28 @@ export default function PlayClient({
 
     const storedPhone = sessionStorage.getItem(`spin_phone_${slug}`);
     if (!storedPhone) {
-      setState({ phase: 'register' });
+      if (!queueEnabled) {
+        // Walk-up mode: check if slot is occupied before showing registration
+        (async () => {
+          try {
+            const slotRes = await fetch(
+              `/api/queue/slot?sessionId=${encodeURIComponent(sessionId)}`
+            );
+            if (slotRes.ok) {
+              const slotData = await slotRes.json();
+              if (slotData.slot_occupied) {
+                setState({ phase: 'holding' });
+                return;
+              }
+            }
+          } catch {
+            // On error, fall through to registration (fail open)
+          }
+          setState({ phase: 'register' });
+        })();
+      } else {
+        setState({ phase: 'register' });
+      }
       return;
     }
 
@@ -124,7 +171,7 @@ export default function PlayClient({
     }
 
     recoverSession(storedPhone);
-  }, [sessionId, slug, status, endTime]);
+  }, [sessionId, slug, status, endTime, queueEnabled]);
 
   function mapStatusToPhase(data: QueueStatusResponse) {
     switch (data.status) {
@@ -283,6 +330,11 @@ export default function PlayClient({
       }
     },
     onPlayerSkipped: (payload) => {
+      // Walk-up mode: if we're on the holding screen, the current player was skipped — check slot
+      if (!queueEnabled && isHoldingRef.current) {
+        checkSlot();
+        return;
+      }
       // If this player was skipped (timed out), transition back to queue.
       // The queue:updated event that follows will set the correct position.
       // Position 0 and estimatedWait 0 are placeholders — corrected immediately
@@ -301,6 +353,11 @@ export default function PlayClient({
       });
     },
     onSpinResult: (payload) => {
+      // Walk-up mode: if we're on the holding screen, the current player just finished — check slot
+      if (!queueEnabled && isHoldingRef.current) {
+        checkSlot();
+        return;
+      }
       if (payload.participant_id === participantId) {
         // Delay result to match TV wheel animation (8 seconds from spin start)
         const SPIN_DURATION_MS = 8000;
@@ -350,6 +407,46 @@ export default function PlayClient({
             <p className="text-center text-xl text-gray-400">
               This event is not currently active.
             </p>
+          </div>
+        </MobileShell>
+      );
+
+    case 'holding':
+      return (
+        <MobileShell eventName={eventName}>
+          <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
+            <div className="text-6xl">🎰</div>
+            {state.slotJustOpened ? (
+              <>
+                <p className="text-xl font-bold text-green-400">
+                  The slot just opened!
+                </p>
+                <p className="text-gray-300">
+                  Tap below to register and play now.
+                </p>
+                <button
+                  onClick={() => setState({ phase: 'register' })}
+                  className="mt-2 w-full max-w-xs rounded-xl bg-green-600 px-6 py-4 text-lg font-bold text-white hover:bg-green-500 active:bg-green-700"
+                >
+                  Tap to Play Now!
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-xl font-bold text-white">
+                  Someone is playing right now.
+                </p>
+                <p className="text-gray-400">
+                  Please wait and scan again when the slot opens.
+                </p>
+                <button
+                  onClick={checkSlot}
+                  className="mt-2 w-full max-w-xs rounded-xl border border-gray-600 bg-gray-800 px-6 py-3 text-sm font-medium text-gray-300 hover:bg-gray-700"
+                >
+                  Check Again
+                </button>
+              </>
+            )}
           </div>
         </MobileShell>
       );

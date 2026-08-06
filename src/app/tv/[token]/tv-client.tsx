@@ -64,6 +64,7 @@ interface TvClientProps {
     sound_preset: SoundPreset;
     tv_token: string;
     spin_timeout_seconds: number;
+    queue_enabled: boolean;
   };
   prizes: Array<{ name: string }>;
   winners: Array<{ name: string; prize_name: string; spin_completed_at: string }>;
@@ -320,19 +321,18 @@ export function TvClient({
           // Use the last buffered payload (most recent positions are authoritative)
           const latest = buffered[buffered.length - 1];
           setQueue((prev) => {
-            const updatedMap = new Map(latest.positions.map((p) => [p.id, p.position]));
+            const updatedMap = new Map(latest.positions.map((p) => [p.id, { name: p.name, position: p.position }]));
             const updated = prev
               .map((entry) => {
-                const newPos = updatedMap.get(entry.id);
-                return newPos !== undefined ? { ...entry, position: newPos } : entry;
+                const newData = updatedMap.get(entry.id);
+                return newData !== undefined ? { ...entry, name: newData.name || entry.name, position: newData.position } : entry;
               })
               .filter((entry) => updatedMap.has(entry.id));
 
             // Add any new entries not present in current state
-            for (const [id, position] of updatedMap) {
+            for (const [id, { name, position }] of updatedMap) {
               if (!updated.some((e) => e.id === id)) {
-                const nameFromPayload = latest.positions.find(p => p.id === id)?.name ?? 'Player';
-                updated.push({ id, name: nameFromPayload, position });
+                updated.push({ id, name: name || 'Player', position });
               }
             }
 
@@ -478,23 +478,23 @@ export function TvClient({
     }
 
     setQueue((prev) => {
-      // Update positions for existing entries, add new ones
-      const updatedMap = new Map(payload.positions.map((p) => [p.id, p.position]));
+      // Build a map of id → { name, position } from the full payload
+      const updatedMap = new Map(payload.positions.map((p) => [p.id, { name: p.name, position: p.position }]));
       const updated = prev
         .map((entry) => {
-          const newPos = updatedMap.get(entry.id);
-          if (newPos !== undefined) {
-            return { ...entry, position: newPos };
+          const newData = updatedMap.get(entry.id);
+          if (newData !== undefined) {
+            // Prefer the payload name if it's a real name, keep existing if payload has none
+            return { ...entry, name: newData.name || entry.name, position: newData.position };
           }
           return entry;
         })
         .filter((entry) => updatedMap.has(entry.id));
 
-      // Add any new entries we don't have yet
-      for (const [id, position] of updatedMap) {
+      // Add any new entries we don't have yet — name comes directly from the map
+      for (const [id, { name, position }] of updatedMap) {
         if (!updated.some((e) => e.id === id)) {
-          const nameFromPayload = payload.positions.find(p => p.id === id)?.name ?? 'Player';
-          updated.push({ id, name: nameFromPayload, position });
+          updated.push({ id, name: name || 'Player', position });
         }
       }
 
@@ -733,15 +733,24 @@ export function TvClient({
 
             {/* Queue display — fills remaining space */}
             <div className="min-h-0 flex-1 overflow-hidden p-3">
-              <QueueDisplay
-                queue={queue.map((q) => ({
-                  ...q,
-                  isActive: (tvState.phase === 'player_active' || tvState.phase === 'spinning')
-                    ? tvState.participantId === q.id
-                    : false,
-                }))}
-                activePlayerName={currentPlayerName}
-              />
+              {session.queue_enabled ? (
+                <QueueDisplay
+                  queue={queue.map((q) => ({
+                    ...q,
+                    isActive: (tvState.phase === 'player_active' || tvState.phase === 'spinning')
+                      ? tvState.participantId === q.id
+                      : false,
+                  }))}
+                  activePlayerName={currentPlayerName}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 py-4 text-center">
+                  <p className="text-lg font-bold text-yellow-300">Walk-Up to Play!</p>
+                  <p className="text-sm text-gray-400">
+                    Scan the QR code above when the slot opens to play instantly.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

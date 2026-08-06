@@ -115,6 +115,7 @@ export default async function TvPage({ params }: TvPageProps) {
           sound_preset: session.sound_preset,
           tv_token: session.tv_token,
           spin_timeout_seconds: session.spin_timeout_seconds,
+          queue_enabled: session.queue_enabled ?? true,
         }}
         prizes={wheelPrizes}
         winners={winners}

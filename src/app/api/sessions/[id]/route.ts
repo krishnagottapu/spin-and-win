@@ -265,6 +265,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         theme: body.theme,
         sound_preset: body.sound_preset,
         spin_timeout_seconds: spinTimeout,
+        queue_enabled: body.queue_enabled ?? true,
       })
       .eq('id', params.id)
       .select()

@@ -36,6 +36,9 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
   const [otpEnabled, setOtpEnabled] = useState(
     session?.otp_enabled ?? true
   );
+  const [queueEnabled, setQueueEnabled] = useState<boolean>(
+    session?.queue_enabled ?? true
+  );
   const [theme, setTheme] = useState<WheelTheme>(session?.theme ?? 'corporate');
   const [soundPreset, setSoundPreset] = useState<SoundPreset>(
     session?.sound_preset ?? 'drumroll'
@@ -103,6 +106,7 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
         max_spins_per_user: maxSpinsPerUser,
         include_no_prize: includeNoPrize,
         otp_enabled: otpEnabled,
+        queue_enabled: queueEnabled,
         theme,
         sound_preset: soundPreset,
         spin_timeout_seconds: spinTimeoutSeconds,
@@ -309,6 +313,26 @@ export default function SessionForm({ session, mode }: SessionFormProps) {
               {otpEnabled
                 ? 'Players must verify their phone number via SMS before joining. Requires Twilio to be configured.'
                 : 'Players join instantly without SMS verification. Use this if Twilio is not set up.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-start sm:col-span-2">
+          <input
+            id="queue_enabled"
+            type="checkbox"
+            checked={queueEnabled}
+            onChange={(e) => setQueueEnabled(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="ml-2">
+            <label htmlFor="queue_enabled" className="text-sm font-medium text-gray-700">
+              Queue Mode
+            </label>
+            <p className="text-xs text-gray-500">
+              {queueEnabled
+                ? 'Players join a FIFO queue and wait for their turn. Best for larger groups.'
+                : 'Walk-Up Mode: only one player at a time. Others see a waiting screen until the slot opens.'}
             </p>
           </div>
         </div>

@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     // 3. Validate session exists and is active
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .select('id, status, end_time')
+      .select('id, status, end_time, queue_enabled')
       .eq('id', session_id)
       .single();
 
@@ -105,16 +105,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Get max queue position for this session
-    const { data: maxPosRow } = await supabase
-      .from('participants')
-      .select('queue_position')
-      .eq('session_id', session_id)
-      .order('queue_position', { ascending: false })
-      .limit(1)
-      .single();
+    // 5b. Walk-up mode: reject if slot is currently occupied
+    if (session.queue_enabled === false) {
+      const { data: walkUpActive } = await supabase
+        .from('participants')
+        .select('id')
+        .eq('session_id', session_id)
+        .in('status', ['active', 'spinning']);
 
-    const nextPosition = (maxPosRow?.queue_position ?? 0) + 1;
+      if (walkUpActive !== null && walkUpActive.length > 0) {
+        return NextResponse.json<ApiError>(
+          {
+            error: 'Someone is currently playing. Please wait and try again.',
+            code: 'SLOT_OCCUPIED',
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // 6. Get max queue position for this session
+    // In walk-up mode, always use position 1 (no persistent queue)
+    let nextPosition: number;
+    if (session.queue_enabled === false) {
+      nextPosition = 1;
+    } else {
+      const { data: maxPosRow } = await supabase
+        .from('participants')
+        .select('queue_position')
+        .eq('session_id', session_id)
+        .order('queue_position', { ascending: false })
+        .limit(1)
+        .single();
+      nextPosition = (maxPosRow?.queue_position ?? 0) + 1;
+    }
 
     // 7. Check if any participant is currently active or spinning
     const { data: activeParticipants } = await supabase

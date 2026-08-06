@@ -15,12 +15,16 @@ vi.mock('@/lib/supabase/broadcast', () => ({
 function createMockSupabase(config: {
   sessionLookup: { data: object | null; error: object | null };
   phoneCheck?: { data: object | null; error: object | null };
+  walkUpSlotCheck?: { data: object[] | null; error: object | null };
   maxPosition?: { data: object | null; error: object | null };
   activeCheck?: { data: object[] | null; error: object | null };
   insert?: { data: object | null; error: object | null };
   queuePositions?: { data: object[] | null; error: object | null };
 }) {
   let participantCallIndex = 0;
+
+  // Determine if walk-up mode is active (session has queue_enabled=false)
+  const isWalkUp = config.walkUpSlotCheck !== undefined;
 
   return {
     from: (table: string) => {
@@ -29,19 +33,40 @@ function createMockSupabase(config: {
       }
       if (table === 'participants') {
         participantCallIndex++;
-        switch (participantCallIndex) {
-          case 1: // Phone uniqueness check
-            return createChainable(config.phoneCheck ?? { data: null, error: { code: 'PGRST116' } });
-          case 2: // Max queue position
-            return createChainableWithOrder(config.maxPosition ?? { data: null, error: { code: 'PGRST116' } });
-          case 3: // Active/spinning check
-            return createChainableInQuery(config.activeCheck ?? { data: [], error: null });
-          case 4: // Insert
-            return createChainableInsert(config.insert ?? { data: { id: 'p-1', status: 'active', queue_position: 1 }, error: null });
-          case 5: // getQueuePositions call
-            return createChainableList(config.queuePositions ?? { data: [], error: null });
-          default:
-            return createChainable({ data: null, error: null });
+
+        if (isWalkUp) {
+          // Walk-up flow: phone → walkUpSlotCheck → activeCheck → insert → queuePositions
+          // (no maxPosition query in walk-up mode)
+          switch (participantCallIndex) {
+            case 1: // Phone uniqueness check
+              return createChainable(config.phoneCheck ?? { data: null, error: { code: 'PGRST116' } });
+            case 2: // Walk-up slot check (.in query)
+              return createChainableInQuery(config.walkUpSlotCheck ?? { data: [], error: null });
+            case 3: // Active/spinning check (step 7)
+              return createChainableInQuery(config.activeCheck ?? { data: [], error: null });
+            case 4: // Insert
+              return createChainableInsert(config.insert ?? { data: { id: 'p-1', status: 'active', queue_position: 1 }, error: null });
+            case 5: // getQueuePositions call
+              return createChainableList(config.queuePositions ?? { data: [], error: null });
+            default:
+              return createChainable({ data: null, error: null });
+          }
+        } else {
+          // Queue mode flow: phone → maxPosition → activeCheck → insert → queuePositions
+          switch (participantCallIndex) {
+            case 1: // Phone uniqueness check
+              return createChainable(config.phoneCheck ?? { data: null, error: { code: 'PGRST116' } });
+            case 2: // Max queue position
+              return createChainableWithOrder(config.maxPosition ?? { data: null, error: { code: 'PGRST116' } });
+            case 3: // Active/spinning check
+              return createChainableInQuery(config.activeCheck ?? { data: [], error: null });
+            case 4: // Insert
+              return createChainableInsert(config.insert ?? { data: { id: 'p-1', status: 'active', queue_position: 1 }, error: null });
+            case 5: // getQueuePositions call
+              return createChainableList(config.queuePositions ?? { data: [], error: null });
+            default:
+              return createChainable({ data: null, error: null });
+          }
         }
       }
       return createChainable({ data: null, error: null });
@@ -119,18 +144,21 @@ const activeSession = {
   id: 'session-uuid-1',
   status: 'active',
   end_time: new Date(Date.now() + 3600000).toISOString(),
+  queue_enabled: true,
 };
 
 const expiredSession = {
   id: 'session-uuid-1',
   status: 'active',
   end_time: new Date(Date.now() - 3600000).toISOString(),
+  queue_enabled: true,
 };
 
 const draftSession = {
   id: 'session-uuid-1',
   status: 'draft',
   end_time: new Date(Date.now() + 3600000).toISOString(),
+  queue_enabled: true,
 };
 
 describe('POST /api/queue/join', () => {
@@ -368,5 +396,125 @@ describe('POST /api/queue/join', () => {
     expect(res.status).toBe(201);
     expect(data.queue_position).toBe(1);         // rank, not raw DB value 20
     expect(data.estimated_wait_seconds).toBe(0); // rank 1 = next up, 0 seconds
+  });
+
+  // ─── Walk-Up Mode Tests ─────────────────────────────────────────────────────
+
+  it('walk-up mode: slot free → status=active, queue_position=1', async () => {
+    const walkUpSession = {
+      id: 'session-uuid-1',
+      status: 'active',
+      end_time: new Date(Date.now() + 3600000).toISOString(),
+      queue_enabled: false,
+    };
+
+    mockSupabaseInstance = createMockSupabase({
+      sessionLookup: { data: walkUpSession, error: null },
+      phoneCheck: { data: null, error: { code: 'PGRST116' } },
+      walkUpSlotCheck: { data: [], error: null },
+      activeCheck: { data: [], error: null },
+      insert: {
+        data: { id: 'walk-up-1', status: 'active', queue_position: 1 },
+        error: null,
+      },
+    });
+
+    const req = makeRequest({
+      session_id: 'session-uuid-1',
+      name: 'WalkUpAlice',
+      phone: '3035551111',
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(data.participant_id).toBe('walk-up-1');
+    expect(data.status).toBe('active');
+    expect(data.queue_position).toBe(1);
+    expect(data.estimated_wait_seconds).toBe(0);
+  });
+
+  it('walk-up mode: slot occupied by active participant → 409 SLOT_OCCUPIED', async () => {
+    const walkUpSession = {
+      id: 'session-uuid-1',
+      status: 'active',
+      end_time: new Date(Date.now() + 3600000).toISOString(),
+      queue_enabled: false,
+    };
+
+    mockSupabaseInstance = createMockSupabase({
+      sessionLookup: { data: walkUpSession, error: null },
+      phoneCheck: { data: null, error: { code: 'PGRST116' } },
+      walkUpSlotCheck: { data: [{ id: 'active-player' }], error: null },
+    });
+
+    const req = makeRequest({
+      session_id: 'session-uuid-1',
+      name: 'WalkUpBob',
+      phone: '3035552222',
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toBe('Someone is currently playing. Please wait and try again.');
+    expect(data.code).toBe('SLOT_OCCUPIED');
+  });
+
+  it('walk-up mode: slot occupied by spinning participant → 409 SLOT_OCCUPIED', async () => {
+    const walkUpSession = {
+      id: 'session-uuid-1',
+      status: 'active',
+      end_time: new Date(Date.now() + 3600000).toISOString(),
+      queue_enabled: false,
+    };
+
+    mockSupabaseInstance = createMockSupabase({
+      sessionLookup: { data: walkUpSession, error: null },
+      phoneCheck: { data: null, error: { code: 'PGRST116' } },
+      walkUpSlotCheck: { data: [{ id: 'spinning-player' }], error: null },
+    });
+
+    const req = makeRequest({
+      session_id: 'session-uuid-1',
+      name: 'WalkUpCharlie',
+      phone: '3035553333',
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.error).toBe('Someone is currently playing. Please wait and try again.');
+    expect(data.code).toBe('SLOT_OCCUPIED');
+  });
+
+  it('walk-up mode: queue_enabled=true with active participant → status=queued (no change)', async () => {
+    // This verifies the existing queue mode behavior is unchanged
+    mockSupabaseInstance = createMockSupabase({
+      sessionLookup: { data: activeSession, error: null },
+      phoneCheck: { data: null, error: { code: 'PGRST116' } },
+      maxPosition: { data: { queue_position: 1 }, error: null },
+      activeCheck: { data: [{ id: 'existing-active' }], error: null },
+      insert: {
+        data: { id: 'queued-participant', status: 'queued', queue_position: 2 },
+        error: null,
+      },
+      queuePositions: { data: [{ id: 'queued-participant', name: 'QueueDave', queue_position: 2 }], error: null },
+    });
+
+    const req = makeRequest({
+      session_id: 'session-uuid-1',
+      name: 'QueueDave',
+      phone: '3035554444',
+    });
+
+    const res = await POST(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(data.status).toBe('queued');
   });
 });

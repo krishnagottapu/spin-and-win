@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     const { data: sessions, error } = await supabase
       .from('sessions')
-      .select('id, event_name, slug, start_time, end_time, status, created_at, updated_at, max_spins_per_user, include_no_prize, theme, sound_preset, tv_token')
+      .select('id, event_name, slug, start_time, end_time, status, created_at, updated_at, max_spins_per_user, include_no_prize, theme, sound_preset, tv_token, queue_enabled')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
         theme: body.theme,
         sound_preset: body.sound_preset,
         spin_timeout_seconds: spinTimeout,
+        queue_enabled: body.queue_enabled ?? true,
         tv_token,
         status: 'draft',
       })
