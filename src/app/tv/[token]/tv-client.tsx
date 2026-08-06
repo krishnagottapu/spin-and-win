@@ -753,8 +753,8 @@ export function TvClient({
               )}
             </div>
 
-            {/* Queue display — fills remaining space */}
-            <div className="min-h-0 flex-1 overflow-hidden p-3">
+            {/* Queue display — fixed minimum height; sponsors take remaining space */}
+            <div className="shrink-0 min-h-[60px] overflow-hidden p-3">
               {session.queue_enabled ? (
                 <QueueDisplay
                   queue={queue.map((q) => ({
@@ -775,26 +775,30 @@ export function TvClient({
               )}
             </div>
 
-            {/* Sponsor logos — pinned to bottom of left sidebar, vertical stack */}
-            <div className="shrink-0 border-t border-gray-800 p-3">
-              <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {/* Sponsor logos — fills remaining sidebar height; logos scale with available space */}
+            <div className="min-h-0 flex-1 flex flex-col border-t border-gray-800 p-3">
+              <p className="shrink-0 mb-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Sponsored by
               </p>
-              <div className="flex flex-col items-center gap-4">
-                <Image
-                  src="/logo/nizel.jpg"
-                  alt="Nizel"
-                  width={200}
-                  height={80}
-                  className="h-20 w-auto object-contain"
-                />
-                <Image
-                  src="/logo/meadows_logo.png"
-                  alt="Meadows"
-                  width={200}
-                  height={80}
-                  className="h-20 w-auto object-contain"
-                />
+              <div className="min-h-0 flex-1 flex flex-col items-center gap-2">
+                <div className="min-h-0 flex-1 flex items-center justify-center w-full">
+                  <Image
+                    src="/logo/nizel.jpg"
+                    alt="Nizel"
+                    width={200}
+                    height={200}
+                    className="max-h-full w-auto max-w-full object-contain"
+                  />
+                </div>
+                <div className="min-h-0 flex-1 flex items-center justify-center w-full">
+                  <Image
+                    src="/logo/meadows_logo.png"
+                    alt="Meadows"
+                    width={200}
+                    height={200}
+                    className="max-h-full w-auto max-w-full object-contain"
+                  />
+                </div>
               </div>
             </div>
           </div>
