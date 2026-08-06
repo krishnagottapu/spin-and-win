@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import { QRCodeSVG } from 'qrcode.react';
 
 import { WinnerLeaderboard } from '@/components/tv/WinnerLeaderboard';
@@ -526,6 +527,18 @@ export function TvClient({
         clearTimeout(autoSkipTimerRef.current);
         autoSkipTimerRef.current = null;
       }
+      // Transition to spinning phase immediately so the countdown timer disappears.
+      // prizeIndex is a placeholder (0) — overwritten by handleSpinResult with the
+      // real index when spin:result arrives and the wheel animation starts.
+      setTvState((prev) => {
+        if (prev.phase !== 'player_active') return prev;
+        return {
+          phase: 'spinning',
+          playerName: prev.playerName,
+          prizeIndex: 0,
+          participantId: prev.participantId,
+        };
+      });
     },
     [] // autoSkipTimerRef is a ref, no dependency needed
   );
@@ -679,7 +692,14 @@ export function TvClient({
         )}
 
         {/* Header — event name with party style */}
-        <div className="shrink-0 border-b border-gray-800 bg-gradient-to-r from-purple-900/50 via-pink-900/50 to-yellow-900/50 px-4 py-3 text-center">
+        <div className="shrink-0 border-b border-gray-800 bg-gradient-to-r from-purple-900/50 via-pink-900/50 to-yellow-900/50 px-4 py-3 flex items-center justify-center gap-4">
+          <Image
+            src="/logo/utsav_logo.png"
+            alt="Utsav Events"
+            width={120}
+            height={40}
+            className="h-10 w-auto object-contain shrink-0"
+          />
           <h1 className="animate-pulse bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-400 bg-clip-text text-2xl font-extrabold tracking-wide text-transparent drop-shadow-lg md:text-4xl">
             🎉 {session.event_name} 🎉
           </h1>
@@ -764,10 +784,33 @@ export function TvClient({
             />
           </div>
 
-          {/* Right sidebar — leaderboard only */}
+          {/* Right sidebar — leaderboard + sponsor logos */}
           <div className="flex w-[360px] shrink-0 flex-col border-l border-gray-800 p-4">
             <div className="min-h-0 flex-1 overflow-hidden">
               <WinnerLeaderboard winners={winners} />
+            </div>
+
+            {/* Sponsor logos — pinned to bottom of right sidebar */}
+            <div className="shrink-0 border-t border-gray-800 pt-3 pb-2">
+              <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Sponsored by
+              </p>
+              <div className="flex items-center justify-center gap-4">
+                <Image
+                  src="/logo/nizel.jpg"
+                  alt="Nizel"
+                  width={120}
+                  height={48}
+                  className="h-12 w-auto object-contain"
+                />
+                <Image
+                  src="/logo/meadows_logo.png"
+                  alt="Meadows"
+                  width={120}
+                  height={48}
+                  className="h-12 w-auto object-contain"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -777,10 +820,12 @@ export function TvClient({
           <div className="flex items-center">
             {/* Logo fixed on left */}
             <div className="z-10 shrink-0 bg-gray-900 pl-4 pr-4">
-              <img
+              <Image
                 src="/logo/utsav_logo.png"
-                alt="Logo"
-                className="h-8 w-auto"
+                alt="Utsav Events"
+                width={80}
+                height={32}
+                className="h-8 w-auto object-contain"
               />
             </div>
             {/* Scrolling ticker */}

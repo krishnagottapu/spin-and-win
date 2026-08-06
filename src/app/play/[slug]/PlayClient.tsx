@@ -85,6 +85,7 @@ export default function PlayClient({
 }: PlayClientProps) {
   const [state, setState] = useState<PlayState>({ phase: 'loading' });
   const [participantId, setParticipantId] = useState<string | null>(null);
+  const [spinStarted, setSpinStarted] = useState(false);
   const spinStartTimeRef = useRef<number>(0);
   const activatedAtRef = useRef<number>(0);
   const isHoldingRef = useRef<boolean>(false);
@@ -92,6 +93,13 @@ export default function PlayClient({
   // Keep isHoldingRef in sync with state phase
   useEffect(() => {
     isHoldingRef.current = state.phase === 'holding';
+  }, [state.phase]);
+
+  // Reset spinStarted when phase leaves 'spin'
+  useEffect(() => {
+    if (state.phase !== 'spin') {
+      setSpinStarted(false);
+    }
   }, [state.phase]);
 
   // Keep standalone participantId in sync with state.participantId.
@@ -567,18 +575,23 @@ export default function PlayClient({
                 </button>
               </div>
             )}
-            <SpinCountdownTimer
-              key={state.participantId}
-              durationSeconds={spinTimeoutSeconds}
-              size="sm"
-            />
+            {!spinStarted && (
+              <SpinCountdownTimer
+                key={state.participantId}
+                durationSeconds={spinTimeoutSeconds}
+                size="sm"
+              />
+            )}
             <SpinButton
               sessionId={sessionId}
               participantId={state.participantId}
               playerName={state.playerName}
               onResult={handleSpinResult}
               onError={handleSpinError}
-              onSpinStart={() => { spinStartTimeRef.current = Date.now(); }}
+              onSpinStart={() => {
+                spinStartTimeRef.current = Date.now();
+                setSpinStarted(true);
+              }}
             />
           </div>
         </MobileShell>

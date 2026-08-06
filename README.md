@@ -25,9 +25,8 @@ Built for event organizers who need a polished, scalable, and zero-friction give
 ## Feature Highlights
 
 - **Spin wheel** — Animated prize wheel powered by `react-custom-roulette`. The server dictates the outcome; the wheel animates to the server-assigned slice index.
-- **Real-time queue** — FIFO queue with live position updates and estimated wait times pushed to every queued phone via Supabase Realtime Broadcast.
-- **Auto-skip** — If a player does not spin within 30 seconds of becoming active, the TV fires an auto-skip request. The player is re-queued at the back; the next player is promoted automatically.
-- **OTP phone verification** — Twilio-based SMS OTP for staff device registration. Staff authenticate with their phone number before accessing the claim interface.
+- **Queue mode and walk-up mode** — Session-level toggle (`Queue Mode` on/off). Queue Mode ON: standard FIFO queue with live position updates and estimated wait times pushed to every queued phone. Queue Mode OFF (walk-up): one player at a time; others see a waiting screen until the slot opens, then scan to play immediately.
+- **Auto-skip** — If a player does not spin within the configured time limit (10–120 seconds, set per session via `spin_timeout_seconds`), the TV fires an auto-skip request. The player is re-queued at the back; the next player is promoted automatically.
 - **Server-authoritative game logic** — Prize selection is weighted random with atomic inventory decrement. No client influence on outcomes.
 - **Prize fulfillment portal** — Staff scan the winner's result QR code or search by name/phone to view and fulfill prizes. Double-claim prevention enforced at the database level.
 - **Admin dashboard** — Create and manage event sessions, configure prizes with weights and inventory, monitor the live queue, and view real-time fulfillment stats.
@@ -36,9 +35,11 @@ Built for event organizers who need a polished, scalable, and zero-friction give
 - **CSV export** — Admins download a full participant report with name, phone, prize won, fulfillment status, timestamps, and the staff member who fulfilled each prize.
 - **Session recovery** — Users who close and reopen the browser re-enter their phone number to recover their queue position or see their spin result.
 - **Three wheel themes** — Corporate, party, and holiday color palettes.
-- **Event lifecycle management** — Draft → Active → Ending (soft stop, existing queue drains) → Ended. Admin can force-end at any time.
-- **Staff portal** — Invite-code-gated access with QR scanner and search. Admin has superset permissions without needing a code.
+- **Event lifecycle management** — Draft → Active → Paused → Ending (soft stop, existing queue drains) → Ended. Admin can force-end at any time.
+- **Staff portal** — Admin-generated setup URL flow for staff registration. Staff set a username and password on first visit; subsequent logins are at the session-specific claim page.
 - **TV token protection** — Each session generates a cryptographically random TV URL token. The TV page is not publicly discoverable.
+- **Sponsor logo display** — Sponsor logos are pinned to the bottom of the TV leaderboard panel for venue branding.
+- **Delete session** — Admin can permanently delete a session from the session list or detail view.
 
 ---
 
@@ -48,25 +49,25 @@ Built for event organizers who need a polished, scalable, and zero-friction give
 
 <!-- screenshot -->
 
-The fullscreen display projected at the event venue. Shows the animated prize wheel in the center, a scrolling winner leaderboard on the right panel, and the join QR code with a live queue list on the left sidebar. When a player becomes active, the sidebar shows their name with a countdown timer. When the spin triggers, the wheel animates with the configured sound preset; on result, confetti fires and the winner's name and prize are prominently displayed. After approximately 10 seconds, the view returns to idle. Supports fullscreen API to hide the browser chrome for a clean stage presentation.
+The fullscreen display projected at the event venue. Shows the animated prize wheel in the center, a scrolling winner leaderboard on the right panel, and the join QR code with a live queue list (or walk-up prompt in walk-up mode) on the left sidebar. When a player becomes active, the sidebar shows their name with a countdown timer. When the spin triggers, the wheel animates with the configured sound preset; on result, confetti fires and the winner's name and prize are prominently displayed. After approximately 10 seconds, the view returns to idle. Supports fullscreen API to hide the browser chrome for a clean stage presentation.
 
 ### Mobile Player (`/play/[slug]`)
 
 <!-- screenshot -->
 
-The player-facing view, optimized for 375px mobile screens. Guides the attendee through three states: (1) registration form collecting name and phone number, (2) queue waiting screen showing live position and estimated wait time, and (3) active spin screen with a large "TAP TO SPIN" button featuring the Utsav Events logo. After spinning, the phone shows the prize result and a unique QR code the attendee presents to staff for fulfillment.
+The player-facing view, optimized for 375px mobile screens. Guides the attendee through the following states: (1) registration form collecting name and phone number, (2) queue waiting screen showing live position and estimated wait time (queue mode) or a holding screen until the slot opens (walk-up mode), and (3) active spin screen with a large "TAP TO SPIN" button featuring the Utsav Events logo. After spinning, the phone shows the prize result and a unique QR code the attendee presents to staff for fulfillment.
 
 ### Admin Dashboard (`/admin`)
 
 <!-- screenshot -->
 
-Password-protected management interface. Admins create and edit event sessions (name, times, prizes, theme, sound), monitor the live queue and inventory levels during an event, generate one-time invite codes for staff, view per-session reports, and export CSV files. The live dashboard subscribes to the same Realtime channel as the TV, so all metrics update without refreshing.
+Password-protected management interface. Admins create and edit event sessions (name, times, prizes, theme, sound, queue mode, spin time limit), monitor the live queue and inventory levels during an event, manage staff access, view per-session reports, and export CSV files. The live dashboard subscribes to the same Realtime channel as the TV, so all metrics update without refreshing.
 
-### Staff Claim Portal (`/claim`)
+### Staff Claim Portal (`/claim/[sessionId]`)
 
 <!-- screenshot -->
 
-Invite-code-gated fulfillment interface for event staff. After one-time device registration via OTP-verified invite code, staff can scan the winner's result QR code using the device camera or search by name/phone. Each result card shows the prize name, winner details, and a "Mark as Fulfilled" button. If a prize has already been claimed, the card shows a red "Already Claimed!" warning with the fulfilling staff member's name and timestamp, preventing double-claim.
+Session-specific fulfillment interface for event staff. Staff are set up by the admin, who creates a staff entry for the session and shares a one-time setup URL. Staff open the setup URL, choose a username and password, and are then able to log in at the session-specific claim page (`/claim/[sessionId]`). Once logged in, staff can scan the winner's result QR code using the device camera or search by name, phone, or prize. Each result card shows the prize name, winner details, and a "Mark as Fulfilled" button. If a prize has already been claimed, the card shows a red "Already Claimed!" warning with the fulfilling staff member's name and timestamp, preventing double-claim.
 
 ---
 
@@ -188,7 +189,7 @@ The app is available at **http://localhost:3000**.
 | http://localhost:3000/admin | Admin dashboard |
 | http://localhost:3000/tv/[token] | TV display (token from a created session) |
 | http://localhost:3000/play/[slug] | Mobile player view |
-| http://localhost:3000/claim | Staff fulfillment portal |
+| http://localhost:3000/claim/[sessionId] | Staff fulfillment portal |
 | http://localhost:54323 | Supabase Studio |
 
 ### Troubleshooting
@@ -312,24 +313,34 @@ Key events:
 
 ### State Machine (TV Client)
 
-The TV client (`tv-client.tsx`) drives its UI through explicit phases: `idle` → `player_active` → `spinning` → `result` → `idle`. Transitions are triggered by incoming Realtime events. The 30-second auto-skip timer starts when entering `player_active` and is cancelled on any phase change. The TV uses a pending-announcements buffer to defer leaderboard updates until the wheel animation completes, preventing winner entries from being lost during a spin.
+The TV client (`tv-client.tsx`) drives its UI through explicit phases: `idle` → `player_active` → `spinning` → `winner` → `idle`. Transitions are triggered by incoming Realtime events.
+
+Key transition details:
+- The auto-skip timer starts when entering `player_active` and is cancelled the moment `spin:start` is received.
+- `spin:start` immediately transitions `player_active` → `spinning`, hiding the countdown timer. The wheel does not animate yet — `targetIndex` remains `null` until `spin:result` arrives with the server-assigned prize index.
+- `spin:result` sets `targetIndex`, which starts the wheel animation. When the wheel stops (`onStopSpinning`), buffered `winner:announced` events are drained into the leaderboard and the phase advances to `winner`.
+- The "Time's up!" overlay is controlled by a `timesUpVisible` boolean independent of `tvState.phase`, so displaying it does not trigger the auto-skip effect's cleanup.
+- `player:active` and `winner:announced` events received while `spinning` or `winner` are buffered and applied after the wheel animation and overlay clear.
 
 ### Session State Machine
 
 ```
-draft → active → ending → ended
-                    ↑
-              (admin force-end from any state)
+draft → active ⇄ paused → ending → ended
+                               ↑
+                  (admin force-end from any state)
 ```
 
 - **draft**: Session configured but not started. No joins allowed.
 - **active**: Players can register and spin.
+- **paused**: New joins and spins are blocked. Admin can resume to `active`.
 - **ending**: End time reached. No new joins. Existing queue drains normally.
 - **ended**: All activity halted. Prizes remain fulfillable by staff.
 
 ### Queue Algorithm
 
-FIFO. On join, the participant is assigned `queue_position = MAX(current positions) + 1`. If no player is currently `active` or `spinning`, the new participant is immediately promoted. On spin completion, the server promotes the next `queued` participant by queue position, sets their `activated_at` timestamp, and broadcasts `player:active`. If no queued participants remain and the session is `ending`, it transitions to `ended`.
+FIFO (queue mode). On join, the participant is assigned `queue_position = MAX(current positions) + 1`. If no player is currently `active` or `spinning`, the new participant is immediately promoted. On spin completion, the server promotes the next `queued` participant by queue position, sets their `activated_at` timestamp, and broadcasts `player:active`. If no queued participants remain and the session is `ending`, it transitions to `ended`.
+
+In walk-up mode (`queue_enabled = false`), the queue is bypassed entirely. A joining player is immediately promoted if the slot is unoccupied; otherwise the mobile client polls for slot availability and shows a waiting screen.
 
 ---
 
@@ -448,18 +459,19 @@ The seed file at `supabase/seed.sql` contains a pre-hashed development password 
 3. Fill in event name, start time, end time.
 4. Add prizes: each prize has a name, weight (relative probability), and inventory count. Optionally add a "No Prize / Better Luck Next Time" slice.
 5. Select a wheel theme (corporate, party, holiday) and sound preset (drumroll, gameshow, casino).
-6. Save. The session is created in **Draft** status.
+6. Configure the spin time limit (10–120 seconds) and toggle Queue Mode on or off.
+7. Save. The session is created in **Draft** status.
 
-#### 2. Generate Staff Invite Codes
+#### 2. Set Up Staff Access
 
-1. In the admin dashboard, go to **Staff**.
-2. Select the session and generate invite codes (1–10 at a time).
-3. Distribute the one-time codes to your staff members.
+1. In the admin dashboard, open the session and go to **Staff**.
+2. Enter a staff member's name and click **Add Staff**. A unique one-time setup URL is generated.
+3. Share the setup URL with each staff member. The URL is shown on the session card and can be copied at any time.
 
 #### 3. Start the Session
 
 1. In the session list, click the session and change status to **Active**.
-2. The TV URL and join slug are now live.
+2. The TV URL, player join URL, and staff portal URL are now live and shown on the session card.
 
 #### 4. Set Up the TV Display
 
@@ -470,17 +482,17 @@ The seed file at `supabase/seed.sql` contains a pre-hashed development password 
 
 #### 5. Staff Device Registration
 
-1. Staff navigate to `/claim` on their phones.
-2. Enter their invite code and phone number.
-3. Enter the OTP sent via SMS to complete registration.
+1. Each staff member opens their one-time setup URL on their device.
+2. They choose a username and password to complete registration.
+3. Staff then log in at the session-specific claim page (`/claim/[sessionId]`).
 4. Staff are now on the fulfillment interface for the session.
 
 #### 6. Players Join
 
 1. Attendees scan the QR code on the TV with their phone camera.
 2. They are taken to `/play/[slug]` and fill in their name and phone number.
-3. The first player is immediately promoted to active and sees "TAP TO SPIN."
-4. Subsequent players see their queue position and estimated wait time, updating live.
+3. **Queue mode:** The first player is immediately promoted to active and sees "TAP TO SPIN." Subsequent players see their queue position and estimated wait time, updating live.
+4. **Walk-up mode:** If the slot is open, the player registers and spins immediately. If a spin is in progress, the player sees a waiting screen and is notified when the slot opens.
 
 #### 7. Spin the Wheel
 
@@ -488,12 +500,12 @@ The seed file at `supabase/seed.sql` contains a pre-hashed development password 
 2. The TV animates the wheel, plays the sound preset, and displays the result.
 3. Confetti fires for prize winners. The winner is added to the leaderboard.
 4. The player's phone shows the prize name and a result QR code.
-5. The next queued player is automatically promoted.
+5. The next queued player is automatically promoted (queue mode), or the slot reopens for the next walk-up (walk-up mode).
 
 #### 8. Auto-Skip (Inactive Player)
 
-If a player does not spin within 30 seconds:
-- The TV fires an auto-skip request.
+If a player does not spin within the configured time limit:
+- The TV shows a "Time's up!" overlay, then fires an auto-skip request.
 - The inactive player is re-queued at the back (their skip count is recorded).
 - The next player is promoted automatically.
 
@@ -503,7 +515,7 @@ If a player does not spin within 30 seconds:
 2. Staff tap **Scan QR** and point their camera at the winner's phone.
 3. The winner card appears with prize name and a **Mark as Fulfilled** button.
 4. Staff tap the button. The prize is marked fulfilled with the staff member's name and timestamp.
-5. If the QR scan is not possible, staff tap **Search** and find the winner by name or phone number.
+5. If the QR scan is not possible, staff use the search field to find the winner by name, phone, or prize.
 
 #### 10. End the Session
 
