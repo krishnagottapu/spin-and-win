@@ -48,6 +48,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Cannot modify prizes on an ended session' }, { status: 403 });
     }
 
+    // Assign sort_order as max existing + 1 so new prizes always land at the end
+    const { data: maxOrderRow } = await supabase
+      .from('prizes')
+      .select('sort_order')
+      .eq('session_id', params.id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .single();
+    const nextSortOrder = (maxOrderRow?.sort_order ?? -1) + 1;
+
     // Insert new prize
     const { data: prize, error: insertError } = await supabase
       .from('prizes')
@@ -57,6 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         weight,
         inventory_count,
         is_no_prize: is_no_prize ?? false,
+        sort_order: nextSortOrder,
       })
       .select()
       .single();

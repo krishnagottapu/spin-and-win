@@ -146,13 +146,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert prizes
-    const prizeRows = body.prizes.map((p) => ({
+    // Insert prizes — sort_order preserves form order so prize_index is stable
+    const prizeRows = body.prizes.map((p, i) => ({
       session_id: session.id,
       name: p.name,
       weight: p.weight,
       inventory_count: p.inventory_count,
       is_no_prize: p.is_no_prize ?? false,
+      sort_order: i,
     }));
 
     const { data: prizes, error: prizesError } = await supabase

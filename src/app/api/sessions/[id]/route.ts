@@ -74,7 +74,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .from('prizes')
       .select('*')
       .eq('session_id', params.id)
-      .order('created_at', { ascending: true });
+      .order('sort_order', { ascending: true });
 
     if (prizesError) {
       console.error('[GET /api/sessions/[id]] prizes fetch', prizesError);
@@ -296,7 +296,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         .from('prizes')
         .select('id')
         .eq('session_id', params.id)
-        .order('created_at', { ascending: true });
+        .order('sort_order', { ascending: true });
 
       if (existingPrizes && existingPrizes.length > 0) {
         for (let i = 0; i < Math.min(existingPrizes.length, body.prizes.length); i++) {
@@ -317,7 +317,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         .from('prizes')
         .select('*')
         .eq('session_id', params.id)
-        .order('created_at', { ascending: true });
+        .order('sort_order', { ascending: true });
 
       return NextResponse.json(
         { session: { ...session, prizes: currentPrizes ?? [] } },
@@ -338,12 +338,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const prizeRows = body.prizes.map((p) => ({
+    const prizeRows = body.prizes.map((p, i) => ({
       session_id: params.id,
       name: p.name,
       weight: p.weight,
       inventory_count: p.inventory_count,
       is_no_prize: p.is_no_prize ?? false,
+      sort_order: i,
     }));
 
     const { data: prizes, error: prizesError } = await supabase

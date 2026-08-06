@@ -116,13 +116,12 @@ export async function POST(request: NextRequest) {
     };
     await broadcastEvent(session_id, 'spin:start', spinStartPayload);
 
-    // 5. Fetch prizes ORDER BY created_at ASC, id ASC (stable sort)
+    // 5. Fetch prizes ORDER BY sort_order ASC (stable insertion order — matches TV wheel index)
     const { data: prizes } = await supabase
       .from('prizes')
       .select('*')
       .eq('session_id', session_id)
-      .order('created_at', { ascending: true })
-      .order('id', { ascending: true });
+      .order('sort_order', { ascending: true });
 
     if (!prizes || prizes.length === 0) {
       return NextResponse.json<ApiError>(
@@ -159,8 +158,7 @@ export async function POST(request: NextRequest) {
         .from('prizes')
         .select('*')
         .eq('session_id', session_id)
-        .order('created_at', { ascending: true })
-        .order('id', { ascending: true });
+        .order('sort_order', { ascending: true });
 
       if (!refreshedPrizes || refreshedPrizes.length === 0) {
         return NextResponse.json<ApiError>(
