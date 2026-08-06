@@ -9,6 +9,7 @@ interface RegistrationFormProps {
   onSuccess: (response: QueueJoinResponse) => void;
   onExistingUser?: (data: QueueStatusResponse) => void;
   otpEnabled: boolean;
+  onSessionEnded?: () => void;
 }
 
 type FormStep = 'info' | 'otp';
@@ -31,6 +32,7 @@ export default function RegistrationForm({
   onSuccess,
   onExistingUser,
   otpEnabled,
+  onSessionEnded,
 }: RegistrationFormProps) {
   const [step, setStep] = useState<FormStep>('info');
   const [name, setName] = useState('');
@@ -119,7 +121,12 @@ export default function RegistrationForm({
 
         if (!joinRes.ok) {
           const errorData = await joinRes.json();
-          setErrors({ general: errorData.error || 'Failed to join queue' });
+          const errorMsg: string = errorData.error || 'Failed to join queue';
+          if (errorMsg.toLowerCase().includes('not accepting') && onSessionEnded) {
+            onSessionEnded();
+            return;
+          }
+          setErrors({ general: errorMsg });
           return;
         }
 
@@ -266,7 +273,12 @@ export default function RegistrationForm({
 
       if (!joinRes.ok) {
         const errorData = await joinRes.json();
-        setErrors({ general: errorData.error || 'Failed to join queue' });
+        const errorMsg: string = errorData.error || 'Failed to join queue';
+        if (errorMsg.toLowerCase().includes('not accepting') && onSessionEnded) {
+          onSessionEnded();
+          return;
+        }
+        setErrors({ general: errorMsg });
         setIsVerifying(false);
         return;
       }

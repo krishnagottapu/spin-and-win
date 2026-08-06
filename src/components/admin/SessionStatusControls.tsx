@@ -75,6 +75,34 @@ export default function SessionStatusControls({
     }
   }
 
+  async function handleDelete() {
+    const confirmed = confirm(
+      'Delete this session? This cannot be undone. All participants, prizes, and staff data for this session will be permanently removed.'
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || 'Failed to delete session');
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError('An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const [baseUrl, setBaseUrl] = useState('');
 
   useEffect(() => {
@@ -106,6 +134,16 @@ export default function SessionStatusControls({
             {loading ? 'Updating...' : t.label}
           </button>
         ))}
+
+        {currentStatus === 'ended' && (
+          <button
+            onClick={handleDelete}
+            disabled={loading}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? 'Deleting...' : 'Delete'}
+          </button>
+        )}
       </div>
 
       {baseUrl && (currentStatus === 'active' || currentStatus === 'paused' || currentStatus === 'ending' || currentStatus === 'ended') && (

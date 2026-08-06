@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin, isAuthError } from '@/lib/auth/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
+import { broadcastEvent } from '@/lib/supabase/broadcast';
 import type {
   CreateSessionRequest,
+  SessionEndedPayload,
   SessionStatus,
   WheelTheme,
   SoundPreset,
@@ -436,9 +438,69 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // Notify all connected clients when a session is force-ended
+    if (newStatus === 'ended') {
+      await broadcastEvent(params.id, 'session:ended', {
+        reason: 'manual',
+      } satisfies SessionEndedPayload);
+    }
+
     return NextResponse.json({ session }, { status: 200 });
   } catch (err) {
     console.error('[PATCH /api/sessions/[id]]', err);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const auth = await requireAdmin(request);
+  if (isAuthError(auth)) return auth;
+
+  try {
+    const supabase = createServiceClient();
+
+    // 1. Check session exists and get its status
+    const { data: existing, error: fetchError } = await supabase
+      .from('sessions')
+      .select('id, status')
+      .eq('id', params.id)
+      .single();
+
+    if (fetchError || !existing) {
+      return NextResponse.json(
+        { error: 'Session not found' },
+        { status: 404 }
+      );
+    }
+
+    // 2. Only allow deletion of ended sessions
+    if (existing.status !== 'ended') {
+      return NextResponse.json(
+        { error: 'Session can only be deleted after it has ended' },
+        { status: 403 }
+      );
+    }
+
+    // 3. Delete — cascade handles prizes, participants, and staff
+    const { error: deleteError } = await supabase
+      .from('sessions')
+      .delete()
+      .eq('id', params.id);
+
+    if (deleteError) {
+      console.error('[DELETE /api/sessions/[id]]', deleteError);
+      return NextResponse.json(
+        { error: 'Failed to delete session' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (err) {
+    console.error('[DELETE /api/sessions/[id]]', err);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

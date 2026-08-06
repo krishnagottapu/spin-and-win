@@ -461,6 +461,7 @@ export default function PlayClient({
               onSuccess={handleRegistrationSuccess}
               onExistingUser={handleExistingUser}
               otpEnabled={otpEnabled}
+              onSessionEnded={() => setState({ phase: 'ended' })}
             />
           </div>
         </MobileShell>
