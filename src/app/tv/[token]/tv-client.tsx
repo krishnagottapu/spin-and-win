@@ -792,7 +792,7 @@ export function TvClient({
                 </div>
                 <div className="min-h-0 flex-1 flex items-center justify-center w-full">
                   <Image
-                    src="/logo/meadows_logo.png"
+                    src="/logo/meadows_logo.jpg"
                     alt="Meadows"
                     width={200}
                     height={200}
