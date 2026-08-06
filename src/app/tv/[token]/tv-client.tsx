@@ -691,15 +691,17 @@ export function TvClient({
           </div>
         )}
 
-        {/* Header — event name with party style */}
-        <div className="shrink-0 border-b border-gray-800 bg-gradient-to-r from-purple-900/50 via-pink-900/50 to-yellow-900/50 px-4 py-3 flex items-center justify-center gap-4">
-          <Image
-            src="/logo/utsav_logo.png"
-            alt="Utsav Events"
-            width={120}
-            height={40}
-            className="h-10 w-auto object-contain shrink-0"
-          />
+        {/* Header — event name centered, logo pinned top-left */}
+        <div className="relative shrink-0 border-b border-gray-800 bg-gradient-to-r from-purple-900/50 via-pink-900/50 to-yellow-900/50 px-4 py-3 flex items-center justify-center">
+          <div className="absolute left-4 top-1/2 -translate-y-1/2">
+            <Image
+              src="/logo/utsav_logo.png"
+              alt="Utsav Events"
+              width={120}
+              height={40}
+              className="h-10 w-auto object-contain"
+            />
+          </div>
           <h1 className="animate-pulse bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-400 bg-clip-text text-2xl font-extrabold tracking-wide text-transparent drop-shadow-lg md:text-4xl">
             🎉 {session.event_name} 🎉
           </h1>
@@ -772,6 +774,29 @@ export function TvClient({
                 </div>
               )}
             </div>
+
+            {/* Sponsor logos — pinned to bottom of left sidebar, vertical stack */}
+            <div className="shrink-0 border-t border-gray-800 p-3">
+              <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Sponsored by
+              </p>
+              <div className="flex flex-col items-center gap-4">
+                <Image
+                  src="/logo/nizel.jpg"
+                  alt="Nizel"
+                  width={200}
+                  height={80}
+                  className="h-20 w-auto object-contain"
+                />
+                <Image
+                  src="/logo/meadows_logo.png"
+                  alt="Meadows"
+                  width={200}
+                  height={80}
+                  className="h-20 w-auto object-contain"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Wheel — centered, pushed down */}
@@ -784,33 +809,10 @@ export function TvClient({
             />
           </div>
 
-          {/* Right sidebar — leaderboard + sponsor logos */}
+          {/* Right sidebar — leaderboard only */}
           <div className="flex w-[360px] shrink-0 flex-col border-l border-gray-800 p-4">
             <div className="min-h-0 flex-1 overflow-hidden">
               <WinnerLeaderboard winners={winners} />
-            </div>
-
-            {/* Sponsor logos — pinned to bottom of right sidebar */}
-            <div className="shrink-0 border-t border-gray-800 pt-3 pb-2">
-              <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Sponsored by
-              </p>
-              <div className="flex items-center justify-center gap-4">
-                <Image
-                  src="/logo/nizel.jpg"
-                  alt="Nizel"
-                  width={120}
-                  height={48}
-                  className="h-12 w-auto object-contain"
-                />
-                <Image
-                  src="/logo/meadows_logo.png"
-                  alt="Meadows"
-                  width={120}
-                  height={48}
-                  className="h-12 w-auto object-contain"
-                />
-              </div>
             </div>
           </div>
         </div>
