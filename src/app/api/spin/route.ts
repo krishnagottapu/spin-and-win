@@ -171,6 +171,52 @@ export async function POST(request: NextRequest) {
     }
 
     if (!selectedPrize) {
+      // Prize inventory exhausted — perform graceful failure cleanup.
+      // We must unblock the slot so other players can join. The participant
+      // is marked completed (no prize) and spin:result is broadcast so their
+      // phone transitions to the result screen instead of hanging.
+      const failureToken = crypto.randomUUID();
+
+      await supabase
+        .from('participants')
+        .update({
+          status: 'completed',
+          prize_id: null,
+          result_token: failureToken,
+          spins_used: typedParticipant.spins_used + 1,
+          spin_started_at: new Date().toISOString(),
+          spin_completed_at: new Date().toISOString(),
+        })
+        .eq('id', participant_id);
+
+      // Broadcast spin:result so the active phone shows a result
+      const failureResultPayload: SpinResultPayload = {
+        participant_id: typedParticipant.id,
+        name: typedParticipant.name,
+        prize_name: 'No Prize',
+        prize_index: 0,
+        is_no_prize: true,
+      };
+      await broadcastEvent(session_id, 'spin:result', failureResultPayload);
+
+      // Promote next participant if any are queued
+      const { promoted: failurePromoted } = await promoteNextParticipant(
+        supabase,
+        session_id,
+        currentSessionStatus
+      );
+      if (failurePromoted) {
+        const failurePlayerActivePayload: PlayerActivePayload = {
+          participant_id: failurePromoted.id,
+          name: failurePromoted.name,
+          position: failurePromoted.queue_position,
+        };
+        await broadcastEvent(session_id, 'player:active', failurePlayerActivePayload);
+      }
+
+      const failurePositions = await getQueuePositions(supabase, session_id);
+      await broadcastEvent(session_id, 'queue:updated', { positions: failurePositions });
+
       return NextResponse.json<ApiError>(
         { error: 'No prizes available' },
         { status: 409 }

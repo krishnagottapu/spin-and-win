@@ -90,6 +90,74 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Walk-up mode: atomic join via RPC — phone check + slot check + insert in one transaction.
+    // Eliminates the TOCTOU race where two simultaneous players can both become active.
+    if (session.queue_enabled === false) {
+      const { data: rpcRows, error: rpcError } = await supabase
+        .rpc('join_walkup_slot', {
+          p_session_id: session_id,
+          p_name: name.trim(),
+          p_phone: phone,
+        });
+
+      if (rpcError) {
+        console.error('[POST /api/queue/join] walk-up RPC error:', rpcError);
+        return NextResponse.json<ApiError>(
+          { error: 'Internal server error' },
+          { status: 500 }
+        );
+      }
+
+      const rpcResult = rpcRows?.[0];
+      if (!rpcResult) {
+        return NextResponse.json<ApiError>(
+          { error: 'Internal server error' },
+          { status: 500 }
+        );
+      }
+
+      if (rpcResult.result_status === 'already_registered') {
+        return NextResponse.json<ApiError>(
+          { error: 'Phone number already registered for this session' },
+          { status: 409 }
+        );
+      }
+
+      if (rpcResult.result_status === 'slot_occupied') {
+        return NextResponse.json<ApiError>(
+          {
+            error: 'Someone is currently playing. Please wait and try again.',
+            code: 'SLOT_OCCUPIED',
+          },
+          { status: 409 }
+        );
+      }
+
+      // result_status === 'active' — participant inserted, broadcast and respond
+      const participantId = rpcResult.participant_id as string;
+      const playerActivePayload: PlayerActivePayload = {
+        participant_id: participantId,
+        name: name.trim(),
+        position: 1,
+      };
+      await broadcastEvent(session_id, 'player:active', playerActivePayload);
+
+      const positions = await getQueuePositions(supabase, session_id);
+      await broadcastEvent(session_id, 'queue:updated', { positions });
+
+      return NextResponse.json<QueueJoinResponse>(
+        {
+          participant_id: participantId,
+          status: 'active',
+          queue_position: 1,
+          estimated_wait_seconds: 0,
+        },
+        { status: 201 }
+      );
+    }
+
+    // Queue mode (queue_enabled=true): existing sequential logic below.
+
     // 5. Check phone uniqueness within this session
     const { data: existing } = await supabase
       .from('participants')
@@ -105,40 +173,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 5b. Walk-up mode: reject if slot is currently occupied
-    if (session.queue_enabled === false) {
-      const { data: walkUpActive } = await supabase
-        .from('participants')
-        .select('id')
-        .eq('session_id', session_id)
-        .in('status', ['active', 'spinning']);
-
-      if (walkUpActive !== null && walkUpActive.length > 0) {
-        return NextResponse.json<ApiError>(
-          {
-            error: 'Someone is currently playing. Please wait and try again.',
-            code: 'SLOT_OCCUPIED',
-          },
-          { status: 409 }
-        );
-      }
-    }
-
     // 6. Get max queue position for this session
-    // In walk-up mode, always use position 1 (no persistent queue)
-    let nextPosition: number;
-    if (session.queue_enabled === false) {
-      nextPosition = 1;
-    } else {
-      const { data: maxPosRow } = await supabase
-        .from('participants')
-        .select('queue_position')
-        .eq('session_id', session_id)
-        .order('queue_position', { ascending: false })
-        .limit(1)
-        .single();
-      nextPosition = (maxPosRow?.queue_position ?? 0) + 1;
-    }
+    const { data: maxPosRow } = await supabase
+      .from('participants')
+      .select('queue_position')
+      .eq('session_id', session_id)
+      .order('queue_position', { ascending: false })
+      .limit(1)
+      .single();
+    const nextPosition = (maxPosRow?.queue_position ?? 0) + 1;
 
     // 7. Check if any participant is currently active or spinning
     const { data: activeParticipants } = await supabase

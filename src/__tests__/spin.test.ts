@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @vitest-environment node
+import { NextRequest } from 'next/server';
 import type { Prize } from '@/lib/types';
 
 // ─── Prize Picker Tests ──────────────────────────────────────────────────────
@@ -365,5 +367,270 @@ describe('getQueuePositions', () => {
     );
 
     expect(positions).toEqual([]);
+  });
+});
+
+
+// ─── Spin Route: Prize Failure Cleanup Tests ─────────────────────────────────
+
+describe('POST /api/spin — prize failure cleanup', () => {
+  // These tests verify that when all prize decrement retries fail,
+  // the route cleans up the participant (marks completed, broadcasts result).
+
+  // We need a fresh module scope to mock the spin route's dependencies.
+  // Using inline vi.mock at top-level won't work here since the file already
+  // has dynamic imports above. Instead we use vi.hoisted + import inline.
+
+  const mockBroadcastEvent = vi.fn().mockResolvedValue(undefined);
+  const mockPromoteNextParticipant = vi.fn().mockResolvedValue({ promoted: null, sessionEnded: false });
+  const mockGetQueuePositions = vi.fn().mockResolvedValue([]);
+
+  let mockSupabaseInstance: Record<string, unknown>;
+  let POST: typeof import('@/app/api/spin/route').POST;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+
+    vi.doMock('@/lib/supabase/broadcast', () => ({
+      broadcastEvent: (...args: unknown[]) => mockBroadcastEvent(...args),
+    }));
+
+    vi.doMock('@/lib/game/queueManager', () => ({
+      promoteNextParticipant: (...args: unknown[]) => mockPromoteNextParticipant(...args),
+      getQueuePositions: (...args: unknown[]) => mockGetQueuePositions(...args),
+    }));
+
+    vi.doMock('@/lib/supabase/server', () => ({
+      createServiceClient: () => mockSupabaseInstance,
+    }));
+
+    vi.doMock('@/lib/game/prizePicker', () => ({
+      pickPrize: (prizes: Prize[]) => ({ prize: prizes[0], prizeIndex: 0 }),
+      PrizeDepletedError: class PrizeDepletedError extends Error {
+        constructor(msg?: string) {
+          super(msg ?? 'No prizes available');
+        }
+      },
+    }));
+  });
+
+  function makeRequest(body: object): NextRequest {
+    return new NextRequest('http://localhost:3000/api/spin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  const activeSession = {
+    id: 'session-1',
+    status: 'active',
+    max_spins_per_user: 1,
+    end_time: '2099-12-31T23:59:59Z',
+  };
+
+  const activeParticipant = {
+    id: 'part-1',
+    session_id: 'session-1',
+    name: 'Alice',
+    phone: '+13035551234',
+    status: 'active',
+    queue_position: 1,
+    spins_used: 0,
+    skip_count: 0,
+    activated_at: new Date().toISOString(),
+  };
+
+  const prizesWithInventory = [
+    {
+      id: 'prize-1',
+      session_id: 'session-1',
+      name: 'Gift Card',
+      weight: 5,
+      inventory_count: 1,
+      is_no_prize: false,
+      created_at: '2026-08-03T10:00:00Z',
+    },
+  ];
+
+  it('marks participant completed and broadcasts spin:result when all prize decrements fail', async () => {
+    // Track update calls
+    const mockUpdate = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+    });
+
+    let fromCallCount = 0;
+    mockSupabaseInstance = {
+      from: vi.fn().mockImplementation((table: string) => {
+        fromCallCount++;
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: activeSession, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'participants') {
+          // First participants call: select (fetch participant)
+          // Subsequent calls: update (cleanup)
+          if (fromCallCount <= 2) {
+            return {
+              select: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: activeParticipant, error: null }),
+                }),
+              }),
+            };
+          }
+          return { update: mockUpdate };
+        }
+        if (table === 'prizes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: prizesWithInventory, error: null }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: null, error: null }),
+            }),
+          }),
+        };
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: false }), // all decrements fail
+    };
+
+    const mod = await import('@/app/api/spin/route');
+    POST = mod.POST;
+
+    const req = makeRequest({ session_id: 'session-1', participant_id: 'part-1' });
+    const res = await POST(req);
+
+    // Assert: 409 returned
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toBe('No prizes available');
+
+    // Assert: participant was updated to completed
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'completed',
+        prize_id: null,
+      })
+    );
+
+    // Assert: spin:result was broadcast with is_no_prize: true
+    expect(mockBroadcastEvent).toHaveBeenCalledWith(
+      'session-1',
+      'spin:result',
+      expect.objectContaining({
+        participant_id: 'part-1',
+        name: 'Alice',
+        is_no_prize: true,
+      })
+    );
+
+    // Assert: promoteNextParticipant was called
+    expect(mockPromoteNextParticipant).toHaveBeenCalled();
+
+    // Assert: queue:updated was broadcast
+    expect(mockBroadcastEvent).toHaveBeenCalledWith(
+      'session-1',
+      'queue:updated',
+      expect.objectContaining({ positions: [] })
+    );
+  });
+
+  it('promotes next participant and broadcasts player:active on prize failure', async () => {
+    const promotedPlayer = {
+      id: 'part-2',
+      name: 'Bob',
+      queue_position: 2,
+      status: 'active',
+    };
+    mockPromoteNextParticipant.mockResolvedValue({ promoted: promotedPlayer, sessionEnded: false });
+    mockGetQueuePositions.mockResolvedValue([{ id: 'part-3', name: 'Charlie', position: 1 }]);
+
+    const mockUpdate = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+    });
+
+    let fromCallCount = 0;
+    mockSupabaseInstance = {
+      from: vi.fn().mockImplementation((table: string) => {
+        fromCallCount++;
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: activeSession, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'participants') {
+          if (fromCallCount <= 2) {
+            return {
+              select: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: activeParticipant, error: null }),
+                }),
+              }),
+            };
+          }
+          return { update: mockUpdate };
+        }
+        if (table === 'prizes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: prizesWithInventory, error: null }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: null, error: null }),
+            }),
+          }),
+        };
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: false }), // all decrements fail
+    };
+
+    const mod = await import('@/app/api/spin/route');
+    POST = mod.POST;
+
+    const req = makeRequest({ session_id: 'session-1', participant_id: 'part-1' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(409);
+
+    // Assert: player:active was broadcast for promoted player
+    expect(mockBroadcastEvent).toHaveBeenCalledWith(
+      'session-1',
+      'player:active',
+      {
+        participant_id: 'part-2',
+        name: 'Bob',
+        position: 2,
+      }
+    );
+
+    // Assert: queue:updated was broadcast with positions
+    expect(mockBroadcastEvent).toHaveBeenCalledWith(
+      'session-1',
+      'queue:updated',
+      { positions: [{ id: 'part-3', name: 'Charlie', position: 1 }] }
+    );
   });
 });

@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     // 1. Validate session is active
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .select('id, status')
+      .select('id, status, queue_enabled')
       .eq('id', session_id)
       .single();
 
@@ -118,7 +118,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Atomically re-queue the skipped player at the back via RPC
+    // 3. Walk-up mode: delete the skipped participant so they must scan again.
+    //    Queue mode: atomically re-queue them at the back via RPC.
+    const isWalkUp = (session as { id: string; status: string; queue_enabled: boolean }).queue_enabled === false;
+
+    if (isWalkUp) {
+      // Delete the participant record — they scan fresh to play again
+      const { error: deleteError } = await supabase
+        .from('participants')
+        .delete()
+        .eq('id', typedPlayer.id)
+        .eq('status', 'active'); // guard: only delete if still active
+
+      if (deleteError) {
+        console.error('[POST /api/queue/skip] walk-up delete error:', deleteError);
+        return NextResponse.json<ApiError>(
+          { error: 'Failed to skip participant' },
+          { status: 500 }
+        );
+      }
+
+      // Broadcast player:skipped so the skipped phone knows to leave spin phase
+      const skippedPayload: PlayerSkippedPayload = {
+        participant_id: typedPlayer.id,
+        name: typedPlayer.name,
+        reason,
+      };
+      await broadcastEvent(session_id, 'player:skipped', skippedPayload);
+
+      // No next player to promote — slot is now empty, waiting for next scan
+      const positions = await getQueuePositions(supabase, session_id);
+      await broadcastEvent(session_id, 'queue:updated', { positions });
+
+      return NextResponse.json(
+        {
+          skipped: { participant_id: typedPlayer.id, name: typedPlayer.name, new_position: null },
+          promoted: null,
+        },
+        { status: 200 }
+      );
+    }
+
+    // Queue mode: atomically re-queue the skipped player at the back via RPC
     const { data: newPosition, error: rpcError } = await supabase.rpc('requeue_skipped_participant', {
       p_participant_id: typedPlayer.id,
     });

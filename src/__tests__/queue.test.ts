@@ -408,16 +408,18 @@ describe('POST /api/queue/join', () => {
       queue_enabled: false,
     };
 
-    mockSupabaseInstance = createMockSupabase({
-      sessionLookup: { data: walkUpSession, error: null },
-      phoneCheck: { data: null, error: { code: 'PGRST116' } },
-      walkUpSlotCheck: { data: [], error: null },
-      activeCheck: { data: [], error: null },
-      insert: {
-        data: { id: 'walk-up-1', status: 'active', queue_position: 1 },
-        error: null,
+    mockSupabaseInstance = {
+      from: (table: string) => {
+        if (table === 'sessions') return createChainable({ data: walkUpSession, error: null });
+        // getQueuePositions after RPC success
+        return createChainableList({ data: [], error: null });
       },
-    });
+      rpc: vi.fn().mockResolvedValue({
+        data: [{ participant_id: 'walk-up-1', result_status: 'active', queue_position: 1 }],
+        error: null,
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
 
     const req = makeRequest({
       session_id: 'session-uuid-1',
@@ -443,11 +445,17 @@ describe('POST /api/queue/join', () => {
       queue_enabled: false,
     };
 
-    mockSupabaseInstance = createMockSupabase({
-      sessionLookup: { data: walkUpSession, error: null },
-      phoneCheck: { data: null, error: { code: 'PGRST116' } },
-      walkUpSlotCheck: { data: [{ id: 'active-player' }], error: null },
-    });
+    mockSupabaseInstance = {
+      from: (table: string) => {
+        if (table === 'sessions') return createChainable({ data: walkUpSession, error: null });
+        return createChainableList({ data: [], error: null });
+      },
+      rpc: vi.fn().mockResolvedValue({
+        data: [{ participant_id: null, result_status: 'slot_occupied', queue_position: 0 }],
+        error: null,
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
 
     const req = makeRequest({
       session_id: 'session-uuid-1',
@@ -471,11 +479,17 @@ describe('POST /api/queue/join', () => {
       queue_enabled: false,
     };
 
-    mockSupabaseInstance = createMockSupabase({
-      sessionLookup: { data: walkUpSession, error: null },
-      phoneCheck: { data: null, error: { code: 'PGRST116' } },
-      walkUpSlotCheck: { data: [{ id: 'spinning-player' }], error: null },
-    });
+    mockSupabaseInstance = {
+      from: (table: string) => {
+        if (table === 'sessions') return createChainable({ data: walkUpSession, error: null });
+        return createChainableList({ data: [], error: null });
+      },
+      rpc: vi.fn().mockResolvedValue({
+        data: [{ participant_id: null, result_status: 'slot_occupied', queue_position: 0 }],
+        error: null,
+      }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
 
     const req = makeRequest({
       session_id: 'session-uuid-1',

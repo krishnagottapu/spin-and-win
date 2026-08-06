@@ -10,6 +10,8 @@ interface RegistrationFormProps {
   onExistingUser?: (data: QueueStatusResponse) => void;
   otpEnabled: boolean;
   onSessionEnded?: () => void;
+  onSlotOccupied?: () => void;
+  queueEnabled?: boolean;
 }
 
 type FormStep = 'info' | 'otp';
@@ -33,6 +35,8 @@ export default function RegistrationForm({
   onExistingUser,
   otpEnabled,
   onSessionEnded,
+  onSlotOccupied,
+  queueEnabled = true,
 }: RegistrationFormProps) {
   const [step, setStep] = useState<FormStep>('info');
   const [name, setName] = useState('');
@@ -121,6 +125,10 @@ export default function RegistrationForm({
 
         if (!joinRes.ok) {
           const errorData = await joinRes.json();
+          if (errorData.code === 'SLOT_OCCUPIED' && onSlotOccupied) {
+            onSlotOccupied();
+            return;
+          }
           const errorMsg: string = errorData.error || 'Failed to join queue';
           if (errorMsg.toLowerCase().includes('not accepting') && onSessionEnded) {
             onSessionEnded();
@@ -273,6 +281,10 @@ export default function RegistrationForm({
 
       if (!joinRes.ok) {
         const errorData = await joinRes.json();
+        if (errorData.code === 'SLOT_OCCUPIED' && onSlotOccupied) {
+          onSlotOccupied();
+          return;
+        }
         const errorMsg: string = errorData.error || 'Failed to join queue';
         if (errorMsg.toLowerCase().includes('not accepting') && onSessionEnded) {
           onSessionEnded();
@@ -365,7 +377,7 @@ export default function RegistrationForm({
           disabled={isSending}
           className="min-h-[56px] w-full rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-lg font-bold text-white transition-all hover:from-purple-700 hover:to-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isSending ? 'Joining...' : otpEnabled ? 'Send Verification Code' : 'Join the Queue'}
+          {isSending ? 'Joining...' : otpEnabled ? 'Send Verification Code' : queueEnabled ? 'Join the Queue' : 'Play Now!'}
         </button>
       </form>
     );

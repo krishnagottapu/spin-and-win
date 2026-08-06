@@ -1,4 +1,4 @@
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -189,5 +189,62 @@ describe('PlayClient — Walk-Up Holding Screen', () => {
     });
 
     expect(screen.queryByText('The slot just opened!')).not.toBeInTheDocument();
+  });
+
+  it('leaves spin phase when player:skipped fires after player:active was received via realtime', async () => {
+    let capturedHandlers: Parameters<typeof mockUseSessionChannel>[1] = {};
+    mockUseSessionChannel.mockImplementation((_id, handlers) => {
+      capturedHandlers = handlers;
+    });
+
+    // Set sessionStorage so the component triggers session recovery into queue phase
+    sessionStorage.setItem('spin_phone_test-event', '5551234567');
+    sessionStorage.setItem('spin_name_test-event', 'Test Player');
+
+    // Mock the queue/status API to return queued state
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          participant_id: 'player-001',
+          status: 'queued',
+          queue_position: 2,
+          estimated_wait_seconds: 60,
+          name: 'Test Player',
+        }),
+    });
+
+    render(<PlayClient {...defaultPlayClientProps} queueEnabled={true} />);
+
+    // Wait for queue phase to be rendered
+    await waitFor(() => {
+      expect(screen.getByTestId('queue-position')).toBeInTheDocument();
+    });
+
+    // Fire player:active — the functional setState reads prev.participantId from queue state
+    act(() => {
+      capturedHandlers.onPlayerActive?.({
+        participant_id: 'player-001',
+        name: 'Test Player',
+        position: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('spin-button')).toBeInTheDocument();
+    });
+
+    // Fire player:skipped — phone must leave spin phase
+    act(() => {
+      capturedHandlers.onPlayerSkipped?.({
+        participant_id: 'player-001',
+        name: 'Test Player',
+        reason: 'timeout',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('spin-button')).not.toBeInTheDocument();
+    });
   });
 });

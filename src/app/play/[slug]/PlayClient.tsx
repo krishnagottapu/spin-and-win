@@ -94,6 +94,18 @@ export default function PlayClient({
     isHoldingRef.current = state.phase === 'holding';
   }, [state.phase]);
 
+  // Keep standalone participantId in sync with state.participantId.
+  // This ensures onPlayerSkipped and onQueueUpdated guards always see the
+  // correct value, regardless of which code path set the spin/queue phase.
+  useEffect(() => {
+    if (
+      (state.phase === 'spin' || state.phase === 'queue') &&
+      state.participantId !== participantId
+    ) {
+      setParticipantId(state.participantId);
+    }
+  }, [state, participantId]);
+
   // Walk-up mode: check slot availability
   const checkSlot = useCallback(async () => {
     try {
@@ -110,6 +122,16 @@ export default function PlayClient({
       // Leave state unchanged on error
     }
   }, [sessionId]);
+
+  // Walk-up mode: periodic poll while on holding screen.
+  // Safety net for missed Realtime events (broadcast has no replay on reconnect).
+  useEffect(() => {
+    if (state.phase !== 'holding' || queueEnabled) return;
+    const intervalId = setInterval(() => {
+      checkSlot();
+    }, 8000);
+    return () => clearInterval(intervalId);
+  }, [state.phase, queueEnabled, checkSlot]);
 
   // Initial mount: check sessionStorage and recover state
   useEffect(() => {
@@ -321,13 +343,23 @@ export default function PlayClient({
       // Used by queued players to show the correct remaining time on their timer.
       activatedAtRef.current = Date.now();
 
-      if (payload.participant_id === participantId) {
-        setState({
+      setState((prev) => {
+        // Read participantId from committed prev state to avoid the race condition
+        // where player:active arrives before setParticipantId() is flushed.
+        // prev.participantId is set synchronously by handleRegistrationSuccess.
+        const myId =
+          prev.phase === 'queue' || prev.phase === 'spin'
+            ? prev.participantId
+            : participantId; // fallback for phases without embedded participantId
+
+        if (payload.participant_id !== myId) return prev;
+
+        return {
           phase: 'spin',
           participantId: payload.participant_id,
           playerName: payload.name,
-        });
-      }
+        };
+      });
     },
     onPlayerSkipped: (payload) => {
       // Walk-up mode: if we're on the holding screen, the current player was skipped — check slot
@@ -335,22 +367,42 @@ export default function PlayClient({
         checkSlot();
         return;
       }
-      // If this player was skipped (timed out), transition back to queue.
-      // The queue:updated event that follows will set the correct position.
-      // Position 0 and estimatedWait 0 are placeholders — corrected immediately
-      // by the onQueueUpdated handler which fires right after player:skipped.
-      if (payload.participant_id !== participantId) return;
-      activatedAtRef.current = 0;
+
+      // Use functional setState to read authoritative participantId from state
+      // (standalone participantId ref can lag during session recovery)
+      let matched = false;
       setState((prev) => {
-        // Only transition out of spin phase — if already in queue or result, leave it
+        const myId =
+          prev.phase === 'spin' || prev.phase === 'queue'
+            ? prev.participantId
+            : participantId;
+
+        if (payload.participant_id !== myId) return prev;
+        matched = true;
+
+        if (!queueEnabled) {
+          // Walk-up: clear storage, go back to register
+          sessionStorage.removeItem(`spin_phone_${slug}`);
+          sessionStorage.removeItem(`spin_name_${slug}`);
+          return { phase: 'register' };
+        }
+        // Queue mode: go back to queue
         if (prev.phase !== 'spin') return prev;
         return {
           phase: 'queue',
           position: 0,
           estimatedWait: 0,
-          participantId: participantId!,
+          participantId: myId!,
         };
       });
+
+      // Side effects that can't run inside setState
+      if (matched) {
+        activatedAtRef.current = 0;
+        if (!queueEnabled) {
+          setParticipantId(null);
+        }
+      }
     },
     onSpinResult: (payload) => {
       // Walk-up mode: if we're on the holding screen, the current player just finished — check slot
@@ -462,6 +514,8 @@ export default function PlayClient({
               onExistingUser={handleExistingUser}
               otpEnabled={otpEnabled}
               onSessionEnded={() => setState({ phase: 'ended' })}
+              onSlotOccupied={() => setState({ phase: 'holding' })}
+              queueEnabled={queueEnabled}
             />
           </div>
         </MobileShell>
